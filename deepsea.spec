@@ -98,7 +98,7 @@ install -m 644 %{_bench_pillar}/config.yml %{buildroot}/%{_bench_pillar}
 install -d -m 755 %{buildroot}/%{_bench_pillar}/collections
 install -m 644 %{_bench_pillar}/collections/default.yml %{buildroot}/%{_bench_pillar}/collections
 
-install -d -m 755 %{buildroot}/%{_bench_pillar}/collections
+install -d -m 755 %{buildroot}/%{_bench_pillar}/fio
 install -m 644 %{_bench_pillar}/fio/multi_rw.yml %{buildroot}/%{_bench_pillar}/fio
 install -m 644 %{_bench_pillar}/fio/seq_reads.yml %{buildroot}/%{_bench_pillar}/fio
 install -m 644 %{_bench_pillar}/fio/seq_writes.yml %{buildroot}/%{_bench_pillar}/fio
@@ -147,7 +147,7 @@ install -m 644 %{_saltceph}/cephfs/benchmarks/prepare_master.sls %{buildroot}/%{
 install -m 644 %{_saltceph}/cephfs/benchmarks/working_subdir.sls %{buildroot}/%{_saltceph}/cephfs/benchmarks
 
 install -d -m 755 %{buildroot}/%{_saltceph}/cephfs/benchmarks/files
-install -m 644 %{_saltceph}/cephfs/benchmarks/files/fio.service.sls %{buildroot}/%{_saltceph}/cephfs/benchmarks/files
+install -m 644 %{_saltceph}/cephfs/benchmarks/files/fio.service %{buildroot}/%{_saltceph}/cephfs/benchmarks/files
 
 install -d -m 755 %{buildroot}/%{_saltceph}/configuration
 install -m 644 %{_saltceph}/configuration/default.sls %{buildroot}/%{_saltceph}/configuration
@@ -437,7 +437,6 @@ install -m 644 %{_saltceph}/rgw/files/rgw.j2 %{buildroot}/%{_saltceph}/rgw/files
 install -d -m 755 %{buildroot}/%{_saltceph}/stage
 install -m 644 %{_saltceph}/stage/all.sls %{buildroot}/%{_saltceph}/stage
 install -m 644 %{_saltceph}/stage/benchmark.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/benchmark_cephfs.sls %{buildroot}/%{_saltceph}/stage
 install -m 644 %{_saltceph}/stage/cephfs.sls %{buildroot}/%{_saltceph}/stage
 install -m 644 %{_saltceph}/stage/configure.sls %{buildroot}/%{_saltceph}/stage
 
@@ -485,14 +484,14 @@ cd %{buildroot}/%{_saltceph}/stage && ln -sf deploy.sls 3.sls
 cd %{buildroot}/%{_saltceph}/stage && ln -sf services.sls 4.sls
 cd %{buildroot}/%{_saltceph}/stage && ln -sf removal.sls 5.sls
 
-%post 
+%post
 # Initialize to most likely value
 sed -i '/^master_minion:/s!_REPLACE_ME_!'`hostname -f`'!' /srv/pillar/ceph/master_minion.sls
 # Restart salt-master if it's running, so it picks up
 # the config changes in /etc/salt/master.d/modules.conf
 systemctl try-restart salt-master > /dev/null 2>&1 || :
 
-%postun 
+%postun
 
 %files
 %defattr(-,root,root,-)
@@ -512,8 +511,10 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %dir /%{_saltceph}/admin
 %dir /%{_saltceph}/admin/files
 %dir /%{_saltceph}/admin/key
-%dir /%{_saltceph}/benchmark/cephfs
-%dir /%{_saltceph}/benchmark/cephfs/files
+%dir /%{_saltceph}/benchmarks
+%dir /%{_saltceph}/cephfs
+%dir /%{_saltceph}/cephfs/benchmarks
+%dir /%{_saltceph}/cephfs/benchmarks/files
 %dir /%{_saltceph}/configuration
 %dir /%{_saltceph}/configuration/files
 %dir /%{_saltceph}/configuration/check
@@ -605,8 +606,9 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %config /%{_saltceph}/admin/*.sls
 %config /%{_saltceph}/admin/files/*.j2
 %config /%{_saltceph}/admin/key/*.sls
-%config /%{_saltceph}/benchmark/cephfs/*.sls
-%config /%{_saltceph}/benchmark/files/fio.service
+%config /%{_saltceph}/benchmarks/cephfs.sls
+%config /%{_saltceph}/cephfs/benchmarks/*.sls
+%config /%{_saltceph}/cephfs/benchmarks/files/fio.service
 %config /%{_saltceph}/configuration/*.sls
 %config /%{_saltceph}/configuration/check/*.sls
 %config /%{_saltceph}/configuration/files/ceph.conf*

@@ -19,7 +19,7 @@
 # See also http://en.opensuse.org/openSUSE:Shared_library_packaging_policy
 
 Name:           deepsea
-Version:        0.5.7
+Version:        0.6
 Release:        0
 Summary:        Salt solution for deploying and managing Ceph
 
@@ -69,7 +69,6 @@ install -d -m 755 %{buildroot}/%{_runners}
 install -m 644 %{_runners}/__init__.py %{buildroot}/%{_runners}
 install -m 644 %{_runners}/advise.py %{buildroot}/%{_runners}
 install -m 644 %{_runners}/benchmark.py %{buildroot}/%{_runners}
-install -m 644 %{_runners}/bootstrap.py %{buildroot}/%{_runners}
 install -m 644 %{_runners}/check.py %{buildroot}/%{_runners}
 install -m 644 %{_runners}/configure.py %{buildroot}/%{_runners}
 install -m 644 %{_runners}/filequeue.py %{buildroot}/%{_runners}
@@ -176,6 +175,11 @@ install -m 644 %{_saltceph}/igw/init.sls %{buildroot}/%{_saltceph}/igw
 install -d -m 755 %{buildroot}/%{_saltceph}/igw/files
 install -m 644 %{_saltceph}/igw/files/sysconfig.lrbd.j2 %{buildroot}/%{_saltceph}/igw/files
 install -m 644 %{_saltceph}/igw/files/keyring.j2 %{buildroot}/%{_saltceph}/igw/files
+install -m 644 %{_saltceph}/igw/files/lrbd.conf.j2 %{buildroot}/%{_saltceph}/igw/files
+
+install -d -m 755 %{buildroot}/%{_saltceph}/igw/config
+install -m 644 %{_saltceph}/igw/config/default.sls %{buildroot}/%{_saltceph}/igw/config
+install -m 644 %{_saltceph}/igw/config/init.sls %{buildroot}/%{_saltceph}/igw/config
 
 install -d -m 755 %{buildroot}/%{_saltceph}/igw/import
 install -m 644 %{_saltceph}/igw/import/default.sls %{buildroot}/%{_saltceph}/igw/import
@@ -228,10 +232,12 @@ install -m 644 %{_saltceph}/mds/pools/init.sls %{buildroot}/%{_saltceph}/mds/poo
 install -d -m 755 %{buildroot}/%{_saltceph}/mds/files
 install -m 644 %{_saltceph}/mds/files/keyring.j2 %{buildroot}/%{_saltceph}/mds/files
 
-install -d -m 755 %{buildroot}/%{_saltceph}/mine_functions
-install -m 644 %{_saltceph}/mine_functions/init.sls %{buildroot}/%{_saltceph}/mine_functions
-install -d -m 755 %{buildroot}/%{_saltceph}/mine_functions/files
-install -m 644 %{_saltceph}/mine_functions/files/mine_functions.conf %{buildroot}/%{_saltceph}/mine_functions/files
+install -d -m 755 %{buildroot}/%{_saltceph}/mines
+install -m 644 %{_saltceph}/mines/default.sls %{buildroot}/%{_saltceph}/mines
+install -m 644 %{_saltceph}/mines/init.sls %{buildroot}/%{_saltceph}/mines
+
+install -d -m 755 %{buildroot}/%{_saltceph}/mines/files
+install -m 644 %{_saltceph}/mines/files/mine_functions.conf %{buildroot}/%{_saltceph}/mines/files
 
 install -d -m 755 %{buildroot}/%{_saltceph}/mon
 install -m 644 %{_saltceph}/mon/default.sls %{buildroot}/%{_saltceph}/mon
@@ -321,6 +327,7 @@ install -m 644 %{_saltceph}/reactor/prep_complete.sls %{buildroot}/%{_saltceph}/
 install -m 644 %{_saltceph}/reactor/prep_minion.sls %{buildroot}/%{_saltceph}/reactor
 
 install -d -m 755 %{buildroot}/%{_saltceph}/refresh
+install -m 644 %{_saltceph}/refresh/default.sls %{buildroot}/%{_saltceph}/refresh
 install -m 644 %{_saltceph}/refresh/init.sls %{buildroot}/%{_saltceph}/refresh
 
 install -d -m 755 %{buildroot}/%{_saltceph}/remove
@@ -454,39 +461,73 @@ install -m 644 %{_saltceph}/rgw/keyring/shared.sls %{buildroot}/%{_saltceph}/rgw
 install -d -m 755 %{buildroot}/%{_saltceph}/rgw/files
 install -m 644 %{_saltceph}/rgw/files/rgw.j2 %{buildroot}/%{_saltceph}/rgw/files
 
-install -d -m 755 %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/all.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/benchmark.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/cephfs.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/configure.sls %{buildroot}/%{_saltceph}/stage
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/all
+install -m 644 %{_saltceph}/stage/all/default.sls %{buildroot}/%{_saltceph}/stage/all
+install -m 644 %{_saltceph}/stage/all/init.sls %{buildroot}/%{_saltceph}/stage/all
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/benchmark
+install -m 644 %{_saltceph}/stage/benchmark/default.sls %{buildroot}/%{_saltceph}/stage/benchmark
+install -m 644 %{_saltceph}/stage/benchmark/init.sls %{buildroot}/%{_saltceph}/stage/benchmark
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/cephfs
+install -m 644 %{_saltceph}/stage/cephfs/default.sls %{buildroot}/%{_saltceph}/stage/cephfs
+install -m 644 %{_saltceph}/stage/cephfs/init.sls %{buildroot}/%{_saltceph}/stage/cephfs
 
 install -d -m 755 %{buildroot}/%{_saltceph}/stage/configure
 install -m 644 %{_saltceph}/stage/configure/default.sls %{buildroot}/%{_saltceph}/stage/configure
-install -m 644 %{_saltceph}/stage/deploy.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/discovery.sls %{buildroot}/%{_saltceph}/stage
+install -m 644 %{_saltceph}/stage/configure/init.sls %{buildroot}/%{_saltceph}/stage/configure
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/deploy
+install -m 644 %{_saltceph}/stage/deploy/default.sls %{buildroot}/%{_saltceph}/stage/deploy
+install -m 644 %{_saltceph}/stage/deploy/init.sls %{buildroot}/%{_saltceph}/stage/deploy
 
 install -d -m 755 %{buildroot}/%{_saltceph}/stage/discovery
-install -m 644 %{_saltceph}/stage/discovery/custom.sls %{buildroot}/%{_saltceph}/stage/discovery
 install -m 644 %{_saltceph}/stage/discovery/default.sls %{buildroot}/%{_saltceph}/stage/discovery
-install -m 644 %{_saltceph}/stage/iscsi.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/openattic.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/prep.sls %{buildroot}/%{_saltceph}/stage
+install -m 644 %{_saltceph}/stage/discovery/init.sls %{buildroot}/%{_saltceph}/stage/discovery
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/iscsi
+install -m 644 %{_saltceph}/stage/iscsi/default.sls %{buildroot}/%{_saltceph}/stage/iscsi
+install -m 644 %{_saltceph}/stage/iscsi/init.sls %{buildroot}/%{_saltceph}/stage/iscsi
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/openattic
+install -m 644 %{_saltceph}/stage/openattic/default.sls %{buildroot}/%{_saltceph}/stage/openattic
+install -m 644 %{_saltceph}/stage/openattic/init.sls %{buildroot}/%{_saltceph}/stage/openattic
 
 install -d -m 755 %{buildroot}/%{_saltceph}/stage/prep
 install -m 644 %{_saltceph}/stage/prep/default.sls %{buildroot}/%{_saltceph}/stage/prep
-install -m 644 %{_saltceph}/stage/prep_minions.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/removal.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/rgw.sls %{buildroot}/%{_saltceph}/stage
-install -m 644 %{_saltceph}/stage/services.sls %{buildroot}/%{_saltceph}/stage
+install -m 644 %{_saltceph}/stage/prep/init.sls %{buildroot}/%{_saltceph}/stage/prep
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/prep/master
+install -m 644 %{_saltceph}/stage/prep/master/default.sls %{buildroot}/%{_saltceph}/stage/prep/master
+install -m 644 %{_saltceph}/stage/prep/master/init.sls %{buildroot}/%{_saltceph}/stage/prep/master
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/prep/minion
+install -m 644 %{_saltceph}/stage/prep/minion/default.sls %{buildroot}/%{_saltceph}/stage/prep/minion
+install -m 644 %{_saltceph}/stage/prep/minion/init.sls %{buildroot}/%{_saltceph}/stage/prep/minion
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/removal
+install -m 644 %{_saltceph}/stage/removal/default.sls %{buildroot}/%{_saltceph}/stage/removal
+install -m 644 %{_saltceph}/stage/removal/init.sls %{buildroot}/%{_saltceph}/stage/removal
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/radosgw
+install -m 644 %{_saltceph}/stage/radosgw/default.sls %{buildroot}/%{_saltceph}/stage/radosgw
+install -m 644 %{_saltceph}/stage/radosgw/init.sls %{buildroot}/%{_saltceph}/stage/radosgw
+
+install -d -m 755 %{buildroot}/%{_saltceph}/stage/services
+install -m 644 %{_saltceph}/stage/services/default.sls %{buildroot}/%{_saltceph}/stage/services
+install -m 644 %{_saltceph}/stage/services/init.sls %{buildroot}/%{_saltceph}/stage/services
 
 install -d -m 755 %{buildroot}/%{_saltceph}/sync
+install -m 644 %{_saltceph}/sync/default.sls %{buildroot}/%{_saltceph}/sync
 install -m 644 %{_saltceph}/sync/init.sls %{buildroot}/%{_saltceph}/sync
 
 install -d -m 755 %{buildroot}/%{_saltceph}/time
-install -m 644 %{_saltceph}/time/custom-salt.sls %{buildroot}/%{_saltceph}/time
-install -m 644 %{_saltceph}/time/custom.sls %{buildroot}/%{_saltceph}/time
+install -m 644 %{_saltceph}/time/default.sls %{buildroot}/%{_saltceph}/time
 install -m 644 %{_saltceph}/time/init.sls %{buildroot}/%{_saltceph}/time
-install -m 644 %{_saltceph}/time/ntp.sls %{buildroot}/%{_saltceph}/time
+
+install -d -m 755 %{buildroot}/%{_saltceph}/time/ntp
+install -m 644 %{_saltceph}/time/ntp/default.sls %{buildroot}/%{_saltceph}/time/ntp
+install -m 644 %{_saltceph}/time/ntp/init.sls %{buildroot}/%{_saltceph}/time/ntp
 
 install -d -m 755 %{buildroot}/%{_saltceph}/updates
 install -m 644 %{_saltceph}/updates/default.sls %{buildroot}/%{_saltceph}/updates
@@ -497,12 +538,12 @@ install -m 644 %{_saltceph}/updates/restart/default.sls %{buildroot}/%{_saltceph
 install -m 644 %{_saltceph}/updates/restart/init.sls %{buildroot}/%{_saltceph}/updates/restart
 
 
-cd %{buildroot}/%{_saltceph}/stage && ln -sf prep.sls 0.sls
-cd %{buildroot}/%{_saltceph}/stage && ln -sf discovery.sls 1.sls
-cd %{buildroot}/%{_saltceph}/stage && ln -sf configure.sls 2.sls
-cd %{buildroot}/%{_saltceph}/stage && ln -sf deploy.sls 3.sls
-cd %{buildroot}/%{_saltceph}/stage && ln -sf services.sls 4.sls
-cd %{buildroot}/%{_saltceph}/stage && ln -sf removal.sls 5.sls
+cd %{buildroot}/%{_saltceph}/stage && ln -sf prep 0
+cd %{buildroot}/%{_saltceph}/stage && ln -sf discovery 1
+cd %{buildroot}/%{_saltceph}/stage && ln -sf configure 2
+cd %{buildroot}/%{_saltceph}/stage && ln -sf deploy 3
+cd %{buildroot}/%{_saltceph}/stage && ln -sf services 4
+cd %{buildroot}/%{_saltceph}/stage && ln -sf removal 5
 
 %post
 # Initialize to most likely value
@@ -517,7 +558,6 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %defattr(-,root,root,-)
 /srv/modules/pillar/stack.py
 %dir /%{_runners}
-%dir /%{_pillar}
 %dir %attr(0755, salt, salt) /%{_pillar}/ceph
 %dir %attr(0755, salt, salt) /%{_pillar}/ceph/stack
 %dir %attr(0755, salt, salt) /%{_pillar}/ceph/benchmark
@@ -540,6 +580,7 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %dir /%{_saltceph}/configuration/check
 %dir /%{_saltceph}/events
 %dir /%{_saltceph}/igw
+%dir /%{_saltceph}/igw/config
 %dir /%{_saltceph}/igw/files
 %dir /%{_saltceph}/igw/import
 %dir /%{_saltceph}/igw/key
@@ -552,8 +593,8 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %dir /%{_saltceph}/mds/auth
 %dir /%{_saltceph}/mds/keyring
 %dir /%{_saltceph}/mds/pools
-%dir /%{_saltceph}/mine_functions
-%dir /%{_saltceph}/mine_functions/files
+%dir /%{_saltceph}/mines
+%dir /%{_saltceph}/mines/files
 %dir /%{_saltceph}/mon
 %dir /%{_saltceph}/mon/files
 %dir /%{_saltceph}/mon/key
@@ -608,11 +649,23 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %dir /%{_saltceph}/rgw/auth
 %dir /%{_saltceph}/rgw/keyring
 %dir /%{_saltceph}/stage
+%dir /%{_saltceph}/stage/all
+%dir /%{_saltceph}/stage/benchmark
+%dir /%{_saltceph}/stage/cephfs
 %dir /%{_saltceph}/stage/configure
+%dir /%{_saltceph}/stage/deploy
 %dir /%{_saltceph}/stage/discovery
+%dir /%{_saltceph}/stage/iscsi
+%dir /%{_saltceph}/stage/openattic
 %dir /%{_saltceph}/stage/prep
+%dir /%{_saltceph}/stage/prep/master
+%dir /%{_saltceph}/stage/prep/minion
+%dir /%{_saltceph}/stage/radosgw
+%dir /%{_saltceph}/stage/removal
+%dir /%{_saltceph}/stage/services
 %dir /%{_saltceph}/sync
 %dir /%{_saltceph}/time
+%dir /%{_saltceph}/time/ntp
 %dir /%{_saltceph}/updates
 %dir /%{_saltceph}/updates/restart
 %config(noreplace) /etc/salt/master.d/*.conf
@@ -640,6 +693,7 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %config /%{_saltceph}/events/*.sls
 %config /%{_saltceph}/igw/*.sls
 %config /%{_saltceph}/igw/files/*.j2
+%config /%{_saltceph}/igw/config/*.sls
 %config /%{_saltceph}/igw/import/*.sls
 %config /%{_saltceph}/igw/key/*.sls
 %config /%{_saltceph}/igw/auth/*.sls
@@ -651,8 +705,8 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %config /%{_saltceph}/mds/auth/*.sls
 %config /%{_saltceph}/mds/keyring/*.sls
 %config /%{_saltceph}/mds/pools/*.sls
-%config /%{_saltceph}/mine_functions/*.sls
-%config /%{_saltceph}/mine_functions/files/*.conf
+%config /%{_saltceph}/mines/*.sls
+%config /%{_saltceph}/mines/files/*.conf
 %config /%{_saltceph}/mon/*.sls
 %config /%{_saltceph}/mon/files/*.j2
 %config /%{_saltceph}/mon/key/*.sls
@@ -704,12 +758,29 @@ systemctl try-restart salt-master > /dev/null 2>&1 || :
 %config /%{_saltceph}/rgw/key/*.sls
 %config /%{_saltceph}/rgw/auth/*.sls
 %config /%{_saltceph}/rgw/keyring/*.sls
-%config /%{_saltceph}/stage/*.sls
+%config /%{_saltceph}/stage/0
+%config /%{_saltceph}/stage/1
+%config /%{_saltceph}/stage/2
+%config /%{_saltceph}/stage/3
+%config /%{_saltceph}/stage/4
+%config /%{_saltceph}/stage/5
+%config /%{_saltceph}/stage/all/*.sls
+%config /%{_saltceph}/stage/benchmark/*.sls
+%config /%{_saltceph}/stage/cephfs/*.sls
 %config /%{_saltceph}/stage/configure/*.sls
+%config /%{_saltceph}/stage/deploy/*.sls
 %config /%{_saltceph}/stage/discovery/*.sls
+%config /%{_saltceph}/stage/iscsi/*.sls
+%config /%{_saltceph}/stage/openattic/*.sls
 %config /%{_saltceph}/stage/prep/*.sls
+%config /%{_saltceph}/stage/prep/master/*.sls
+%config /%{_saltceph}/stage/prep/minion/*.sls
+%config /%{_saltceph}/stage/radosgw/*.sls
+%config /%{_saltceph}/stage/removal/*.sls
+%config /%{_saltceph}/stage/services/*.sls
 %config /%{_saltceph}/sync/*.sls
 %config /%{_saltceph}/time/*.sls
+%config /%{_saltceph}/time/ntp/*.sls
 %config /%{_saltceph}/updates/*.sls
 %config /%{_saltceph}/updates/restart/*.sls
 %doc

@@ -382,9 +382,12 @@ class OSDConfig(object):
         """
         filters = kwargs.get('filters', None)
         # top_level_identifiier
+        self.device = readlink(device)
+        self.construct()
+
+    def construct(self):
         self.tli = self._set_tli()
         #self.device = self.set_device(device)
-        self.device = readlink(device)
         self.capacity = self.set_capacity()
         self.size = self.set_bytes()
         self.small = self._set_small()
@@ -790,7 +793,7 @@ class OSDPartitions(object):
 def partition(device):
     """
     """
-    config = OSDConfig(device)
+    config = OSDConfig(device).construct()
     osdp = OSDPartitions(config)
     return osdp.partition()
 
@@ -1512,7 +1515,7 @@ def is_partitioned(device):
     """
     Check if device is partitioned
     """
-    config = OSDConfig(device)
+    config = OSDConfig(device).construct()
     osdc = OSDCommands(config)
     return osdc.is_partitioned(device)
 
@@ -1525,7 +1528,7 @@ def is_prepared(device):
     to debug that configuration without reading python?  This task is left for
     later...
     """
-    config = OSDConfig(device)
+    config = OSDConfig(device).construct()
     osdc = OSDCommands(config)
     partition = osdc.osd_partition()
     if partition == 0:
@@ -1558,7 +1561,7 @@ def is_activated(device):
     """
     Check if the device has already been activated.  Return shell command.
     """
-    config = OSDConfig(device)
+    config = OSDConfig(device).construct()
     osdc = OSDCommands(config)
     partition = osdc.osd_partition()
     pathname = "{}{}".format(config.device, partition)
@@ -1577,7 +1580,7 @@ def prepare(device):
     give the desired results since the evaluation of the prepare command (and
     the partition check) occurs prior to creating the partitions
     """
-    config = OSDConfig(device)
+    config = OSDConfig(device).construct()
     osdp = OSDPartitions(config)
     osdp.partition()
     osdc = OSDCommands(config)
@@ -1587,14 +1590,14 @@ def activate(device):
     """
     Return ceph-disk command to activate OSD.
     """
-    config = OSDConfig(device)
+    config = OSDConfig(device).construct()
     osdc = OSDCommands(config)
     return osdc.activate()
 
 def detect(osd_id):
     """
     """
-    config = OSDConfig(device)
+    config = OSDConfig(device).construct()
     osdc = OSDCommands(config)
     return osdc.detect(osd_id)
 

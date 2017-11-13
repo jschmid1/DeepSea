@@ -27,7 +27,7 @@ class Cluster(object):
     @property
     def config_options(self):
         # later with salt
-        return {'key1': 'val1', 'key2': 'val2', 'key3': 'val3'}
+        return self._conf_options
 
     @config_options.setter
     def config_options(self, opts):
@@ -182,37 +182,39 @@ def item_chosen(button):
 
 def item_edit(button):
     config_option = button.label
-    text_edit_cap1 = ('editcp', u"{}".format(button.label))
+    text_edit_cap1 = ('editcp', u"{}: ".format(button.label))
     text_edit_text1 = u"The config option that was parsed from salt"
     #ask = urwid.AttrWrap(urwid.Edit(text_edit_cap1, text_edit_text1), 'editbx', 'editfc')
     ask = urwid.Edit(text_edit_cap1, text_edit_text1)
-    reply = urwid.Text(u"")
     button = urwid.Button(u'Save')
+    reply = urwid.Text(u'')
     div = urwid.Divider()
-    pile = urwid.Pile([ask, div, div, button])
+    pile = urwid.Pile([ask, div, reply, div, button])
     # This section seems hacky, I just want to pass the edited text
     # to the save_config_option callback. reply.get_text() seems to be empty
+    config_setting = ""
     def on_ask_change(edit, new_edit_text):
-        # do I need a <Text> object here?
         reply.set_text(new_edit_text)
+    logging.info('Inside_item_edit reply is: {}'.format(reply.text))
     # Decorations of Edit -> AttrWrap can not be connected to signals
-    urwid.connect_signal(ask, 'change', on_ask_change)
     # EOC
 
-    user_data = {'key': config_option, 'value': reply.get_text}
+    urwid.connect_signal(ask, 'change', on_ask_change)
+    user_data = {'key': config_option, 'value': reply}
     urwid.connect_signal(button, 'click', save_config_option, user_data)
     topo = urwid.Filler(pile, valign='top')
+    logging.info('Inside_item_edit reply is: {}'.format(reply.text))
 
     top.open_box(topo)
 
 def save_config_option(obj, user_data):
-    if cl.config_options[user_data['key']]:
-        cl.config_options[user_data['key']] = user_data['value']
+    if user_data['key'] in cl.config_options:
+        cl.config_options[user_data['key']] = user_data['value'].text
     else:
         logging.info('handle this case')
-    logging.info('Save config option successfully.')
+    logging.info('user_data: {}'.format(user_data))
+    logging.info('Saved config option successfully. new value: {}'.format(user_data['value'].text))
     logging.info(cl.config_options)
-    #logging.info('Saving information for {}'.format(config_option))
 
 # rename register_role_change
 def register_change(obj, dunno, node_name):
@@ -250,7 +252,8 @@ all_hosts = cl.hosts
 all_clusters = cl.clusters()
 cl.roles = ['MON', 'OSD', 'MDS', 'RGW', 'IGW', 'NFS-GANESHA', 'OPENATTIC']
 all_roles = cl.roles
-all_config_options = cl.config_options.keys()
+cl.config_options = {'config1': 'val1', 'config2': 'val2', 'config3': 'val3'}
+all_config_options = cl.config_options
 
 menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster', 
                                          [ 

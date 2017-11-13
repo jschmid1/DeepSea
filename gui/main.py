@@ -70,23 +70,38 @@ class Cluster(object):
     def layout(self, new_layout):
         self._layout = new_layout
 
-    #TODO:
-
     def find_node_name(self):
-        pass
+        # a 'bit' hacky..
+        node_name = set(self.hosts).intersection(self.selections).pop()
+        # raise if None
+        return node_name
+
+    def find_role_name(self):
+        # a 'bit' hacky..
+        role_name = set(self.roles).intersection(self.selections).pop()
+        # raise if None
+        return role_name
 
     def layout_diff(self):
         pass
 
     def reverse_view(self):
-        pass
         # show roles that list nodes
+        nodes = []
+        role = self.find_role_name()
+        logging.info('Found role: {}'.format(role))
+        for node, roles in self.layout.iteritems():
+            logging.info("Node: {}".format(node))
+            logging.info("with roles: {}".format(roles))
+            if role in roles:
+                nodes.append(node)
+        return nodes
+
 
 cl = Cluster()
 
 def register_position(widget_obj):
     logging.info(widget_obj.label)
-    logging.info(dir(widget_obj))
     cl.add_to_selections(widget_obj.label)
 
 def menu_button(caption, callback):
@@ -106,21 +121,28 @@ def menu(title, choices):
     body.extend(choices)
     return urwid.ListBox(urwid.SimpleFocusListWalker(body))
 
+def host_selector_callback(button):
+    response = urwid.Text([u'You chose ', button.label, u'\n'])
+    logging.info(cl.layout)
+    hosts = cl.reverse_view()
+    arg_to_open_box = [response]
+    for host in hosts:
+        user_data = button.label
+        check_box_host = urwid.CheckBox(unicode(host))
+        check_box_host.set_state(True)
+        urwid.connect_signal(check_box_host, 'change', register_host_change, user_data)
+        arg_to_open_box.append(check_box_host)
+    top.open_box(urwid.Filler(urwid.Pile(arg_to_open_box)))
+
+    logging.info("Hosts with selected Role {}".format(hosts))
+
 def role_selector_callback(button):
     response = urwid.Text([u'You chose ', button.label, u'\n'])
     check_box_mon = urwid.CheckBox(u"MON")
     check_box_mds = urwid.CheckBox(u"MDS")
     check_box_rgw = urwid.CheckBox(u"RGW")
     check_box_osd = urwid.CheckBox(u"OSD")
-    # TODO: properly detect the node_name 
-    # how:
-    # 1) set a flag on the 'node selection'.
-    # 2) regex it? that's probably error prone
-    # 3) convert the 'selectios' stack to be a dict and
-    #    set the 'node_name' key properly when you hit the 
-    #    'Hosts' tab. That should be easy to detect.
-    # 4) Set a hidden flag in the selection menu
-    node_name = cl.selections[-1]
+    node_name = cl.find_node_name()
     layout = cl.layout[node_name]
     for role in layout:
         if role == u'MON':
@@ -137,7 +159,6 @@ def role_selector_callback(button):
     urwid.connect_signal(check_box_rgw, 'change', register_change, user_data)
     urwid.connect_signal(check_box_osd, 'change', register_change, user_data)
     top.open_box(urwid.Filler(urwid.Pile([response, check_box_mon, check_box_mds, check_box_rgw, check_box_osd])))
-
 
 def conf_selector_callback(button):
     response = urwid.Text([u'You chose ', button.label, u'\n'])
@@ -160,13 +181,26 @@ def register_change(obj, dunno, node_name):
     # True seems to be unchecked
     layout = cl.layout
     logging.info("Current layout: {}".format(layout))
-    node_name = cl.selections[-1]
+    node_name = cl.find_node_name()
     if obj.get_state() is False:
-        logging.info("Slected role {}".format(obj.label))
+        logging.info("Selected role {}".format(obj.label))
         cl.layout[node_name].append(obj.label)
     if obj.get_state() is True:
         logging.info("Deselected role {}".format(obj.label))
         cl.layout[node_name].remove(obj.label)
+
+# rename register_role_change
+def register_host_change(obj, dunno, node_name):
+    # True seems to be unchecked
+    layout = cl.layout
+    logging.info("Current layout: {}".format(layout))
+    role_name = cl.find_role_name()
+    if obj.get_state() is False:
+        logging.info("Slected role {}".format(obj.label))
+        cl.layout[obj.label].append(role_name)
+    if obj.get_state() is True:
+        logging.info("Deselected role {}".format(obj.label))
+        cl.layout[obj.label].remove(role_name)
 
 def exit_program(button):
     raise urwid.ExitMainLoop()
@@ -176,7 +210,8 @@ clcl = cl
 
 all_hosts = cl.hosts
 all_clusters = cl.clusters()
-all_roles = ['MON', 'OSD', 'MDS', 'RGW', 'IGW', 'NFS-GANESHA', 'OPENATTIC']
+cl.roles = ['MON', 'OSD', 'MDS', 'RGW', 'IGW', 'NFS-GANESHA', 'OPENATTIC']
+all_roles = cl.roles
 all_config_options = cl.config_options.keys()
 
 menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster', 
@@ -184,7 +219,7 @@ menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster',
                                           sub_menu(u'{}'.format(cluster_name), [ 
                                               sub_menu(u'Roles', [ 
                                                       sub_menu(u'{}'.format(role), [ 
-                                                          sub_menu(u'Assigned Hosts', [ menu_button(u'ADSD', item_chosen), menu_button(u'UASDASD', item_chosen)]), 
+                                                          menu_button(u'Assigned Roles', host_selector_callback),
                                                           sub_menu(u'Config for Role', [ menu_button(u'ADSD', item_chosen), menu_button(u'UASDASD', item_chosen)]), 
                                                               ]) for role in all_roles ]), 
                                               sub_menu(u'Cluster Config', [ menu_button(u'ADSD', item_chosen), menu_button(u'UASDASD', item_chosen)]), 
@@ -242,6 +277,5 @@ def main():
 
     loop = urwid.MainLoop(top, palette)
     loop.run()
-
 
 main()

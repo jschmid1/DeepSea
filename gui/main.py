@@ -1,33 +1,48 @@
 import urwid
 import logging
+import logging.config
 import salt.client
 import yaml
 import os
-logging.basicConfig(filename='example.log', level=logging.INFO)
 
-""" 
-TODO:
+LOG_LEVEL="INFO"
+LOG_FILE_PATH="/root/policy.log"
 
-Create a Config() class that implements a .save()
-and .load() functions for diverse config options
+def _setup_logging():
+    """
+    Logging configuration
+    """
+    if LOG_LEVEL == "silent":
+        return
 
-Options may parsed out of files located in different locations
+    logging.config.dictConfig({
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'standard': {
+                'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+            },
+        },
+        'handlers': {
+            'file': {
+                'level': LOG_LEVEL.upper(),
+                'filename': LOG_FILE_PATH,
+                'class': 'logging.FileHandler',
+                'formatter': 'standard'
+            },
+        },
+        'loggers': {
+            '': {
+                'handlers': ['file'],
+                'level': LOG_LEVEL.upper(),
+                'propagate': True,
+            }
+        }
+    })
 
-/srv/pillar/ceph/
-/srv/pillar/ceph/cluster/
-/srv/pillar/ceph/stack/global.yml
-/srv/pillar/ceph/stack/ceph/
-/srv/pillar/ceph/stack/ceph/cluster.yml
-/srv/pillar/ceph/stack/default/ceph/cluster.yml
+logger = logging.getLogger(__name__)
 
-Maybe we should add pre-loaded options for init.sls I need
-to parse all dirs under /srv/salt/ceph/
-
-Global 'Host' configurations might be set for.
-
-/etc/sysctl.conf
-
-"""
+_setup_logging()
 
 class Node(object):
     def __init__(self, name):
@@ -45,32 +60,58 @@ class Node(object):
 
 class Role(object):
     def __init__(self, name):
+        if name == 'storage':
+            name = 'osd'
         self.name = name
         self.cfg = Cfg
         self.config_path = self.path()
 
     def path(self):
-        # except storage
         return "/srv/salt/ceph/configuration/files/ceph.conf.d/{}.conf".format(self.name)
 
     def read_conf(self):
         if os.path.exists(self.config_path):
-            return self.cfg(self.config_path).read_()
+            return self.cfg(self.config_path, mode='ceph').read_()
         else:
             return ""
 
+    def write_conf(self, content):
+        if os.path.exists(self.config_path):
+            return self.cfg(self.config_path, mode='ceph').write_(content)
+
+
 class Cfg(object):
 
-    def __init__(self, filename=None):
+    def __init__(self, filename=None, mode='yaml'):
+        self.mode = mode
         self.filename = filename
 
     def write_(self, content):
         with open(self.filename, 'w') as _fd:
-            _fd.write(yaml.dump(content))
-
+            if self.mode == 'yaml':
+                _fd.write(yaml.dump(content))
+            elif self.mode == 'ceph':
+                # convert back to k=v style
+                for key, val in content.iteritems():
+                    opt = "{}={}".format(key, val)
+                    _fd.write(opt)
+            else:
+                raise IOError('Dont know how to handle parsing mode {}'.format(mode))
+            
     def read_(self):
         with open(self.filename, 'r') as _fd:
-            return yaml.load(_fd)
+            if self.mode == 'yaml':
+                return yaml.load(_fd)
+            elif self.mode == 'ceph':
+                loo = [ line.strip() for line in  _fd.readlines() ]
+                config = {}
+                for entry in loo:
+                    # There is a ConfigParser which might be safer :D
+                    split = entry.split('=')
+                    config[split[0]] = split[1]
+                return config
+            else:
+                raise IOError('Dont know how to handle parsing mode {}'.format(mode))
 
 class Settings(object):
 
@@ -311,6 +352,32 @@ def item_chosen(button):
     done = menu_button(u'Ok', exit_program)
     top.open_box(urwid.Filler(urwid.Pile([response, done])))
 
+def item_edit_role(button):
+    config_option = button.label
+    text_edit_cap1 = ('editcp', u"{}: ".format(button.label))
+
+    # we already loaded this, save it somewhere
+    role = cl.find_role_name()
+    config_value = cl.role_options(role)[config_option]
+
+    text_edit_text1 = u"{}".format(config_value)
+    #ask = urwid.AttrWrap(urwid.Edit(text_edit_cap1, text_edit_text1), 'editbx', 'editfc')
+    ask = urwid.Edit(text_edit_cap1, text_edit_text1)
+    button = urwid.Button(u'Save')
+    reply = urwid.Text(u'')
+    div = urwid.Divider()
+    pile = urwid.Pile([ask, div, reply, div, button])
+    #
+    def on_ask_change(edit, new_edit_text):
+        reply.set_text(new_edit_text)
+    # Decorations of Edit -> AttrWrap can not be connected to signals
+
+    urwid.connect_signal(ask, 'change', on_ask_change)
+    user_data = {'key': config_option, 'value': reply, 'role': role}
+    urwid.connect_signal(button, 'click', save_role_config_option, user_data)
+    topo = urwid.Filler(pile, valign='top')
+    top.open_box(topo)
+
 def item_edit(button):
     config_option = button.label
     text_edit_cap1 = ('editcp', u"{}: ".format(button.label))
@@ -377,6 +444,26 @@ def save_cluster_config_option(obj, user_data):
         logging.info(cl.cluster_options)
         
         cfg.write_cluster_conf(user_data['cluster'], cl.cluster_options)
+        saved_callback('ok')
+    else:
+        logging.info('No Change in configuration. Not saving.')
+
+def save_role_config_option(obj, user_data):
+    role = str(user_data['role'])
+    key = str(user_data['key'])
+    value = str(user_data['value'].text)
+    # Switch to getter and setter
+    content = cl.role_options(role)
+    if value != '':
+        if key in content:
+            content[key] = value
+        else:
+            logging.info('handle this case')
+        logging.info('user_data: {}'.format(user_data))
+        logging.info('Saved config option successfully. new value: {}'.format(value))
+        logging.info(content)
+        
+        Role(role).write_conf(content)
         saved_callback('ok')
     else:
         logging.info('No Change in configuration. Not saving.')
@@ -449,7 +536,7 @@ menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster',
                                                       sub_menu(u'{}'.format(role), [ 
                                                           menu_button(u'Assigned Hosts', host_selector_callback),
                                                           sub_menu(u'Config for Role', [ 
-                                                              menu_button(u'{}'.format(config_option), item_edit) for config_option in cl.global_options]), 
+                                                              menu_button(u'{}'.format(config_option), item_edit_role) for config_option in cl.role_options(role)]), 
                                                               ]) for role in cl.roles ]), 
                                               sub_menu(u'Cluster Config', [
                                                   menu_button(u'{}'.format(config_option), item_edit_cluster) for config_option in cl.cluster_options]), 
@@ -496,6 +583,7 @@ class CascadingBoxes(urwid.WidgetPlaceholder):
         else:
             return super(CascadingBoxes, self).keypress(size, key)
 
+# Make this less hacky
 def default_footer():
     saved_flag = ('key', " SAVED")
     if saved_flag in footer_text:
@@ -503,6 +591,7 @@ def default_footer():
         footer = urwid.AttrMap(urwid.Text(footer_text), 'foot')
         view.footer = footer
 
+# Classify that to access view.footer/header instead of accessing this globally
 #import pdb;pdb.set_trace()
 urwid.command_map['h'] = urwid.CURSOR_LEFT
 urwid.command_map['j'] = urwid.CURSOR_DOWN

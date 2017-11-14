@@ -1,7 +1,9 @@
 import urwid
 import logging
 import salt.client
-logging.basicConfig(filename='example.log',level=logging.DEBUG)
+import yaml
+import os
+logging.basicConfig(filename='/root/example.log',level=logging.DEBUG)
 
 """ 
 TODO:
@@ -13,10 +15,10 @@ Options may parsed out of files located in different locations
 
 /srv/pillar/ceph/
 /srv/pillar/ceph/cluster/
-/srv/pillar/ceph/cluster/stack/global.cfg
-/srv/pillar/ceph/cluster/stack/ceph/
-/srv/pillar/ceph/cluster/stack/ceph/cluster.yml
-/srv/pillar/ceph/cluster/stack/default/ceph/cluster.yml
+/srv/pillar/ceph/stack/global.yml
+/srv/pillar/ceph/stack/ceph/
+/srv/pillar/ceph/stack/ceph/cluster.yml
+/srv/pillar/ceph/stack/default/ceph/cluster.yml
 
 Maybe we should add pre-loaded options for init.sls I need
 to parse all dirs under /srv/salt/ceph/
@@ -27,60 +29,48 @@ Global 'Host' configurations might be set for.
 
 """
 
+class Node(object):
+    def __init__(self, name):
+        self.name = name
+        self._roles = None
+    
+    @property
+    def roles(self):
+        return self._roles
+
+    @roles.setter
+    def roles(self, role):
+        self._roles = roles
+
+
+class Role(object):
+    def __init__(self, name):
+        self.name = name
+
+    def config_path(self):
+        pass
+
+class Cfg(object):
+
+    def __init__(self, filename=None):
+        self.filename = filename
+
+    def write_(self, content):
+        with open(self.filename, 'w') as _fd:
+            _fd.write(yaml.dump(content))
+
+    def read_(self):
+        with open(self.filename, 'r') as _fd:
+            return yaml.load(_fd)
+
+#       rename -> SaltGet
 class Settings(object):
-    """
-    Common settings
-    """
 
     def __init__(self):
-        """
-        Assign root_dir, salt __opts__ and stack configuration.  (Stack
-        configuration is not used currently.)
-        """
-        __opts__ = salt.config.client_config('/etc/salt/master')
-        self.__opts__ = __opts__
-
-        for ext in __opts__['ext_pillar']:
-            if 'stack' in ext:
-                self.stack = ext['stack']
-        self.root_dir = "/srv/pillar/ceph/proposals"
-
-class SaltWriter(object):
-    """
-    All salt files are essentially yaml files in the pillar by default.  The
-    pillar uses sls extensions and stack.py uses yml.
-    """
-
-    def __init__(self, **kwargs):
-        """
-        Keep yaml human readable/editable.  Disable yaml references.
-        """
-        self.dumper = yaml.SafeDumper
-        self.dumper.ignore_aliases = lambda self, data: True
-
-        if 'overwrite' in kwargs:
-            self.overwrite = kwargs['overwrite']
-        else:
-            self.overwrite = False
-
-    def write(self, filename, contents):
-        """
-        Write a yaml file in the conventional way
-        """
-        if self.overwrite or not os.path.isfile(filename):
-            log.info("Writing {}".format(filename))
-            with open(filename, "w") as yml:
-                yml.write(yaml.dump(contents, Dumper=self.dumper,
-                          default_flow_style=False))
-
-class Config(object):
-
-    def __init__(self):
-        self.settings = Settings()
+        self.cfg = Cfg
         self.local = salt.client.LocalClient()
         self.master_minion = self.get_master()
         self.deepsea_minions = self.deepsea_minions()
-        # get from pillar
         self.pre_check()
 
     def pre_check(self):
@@ -88,6 +78,18 @@ class Config(object):
            raise ImportError("There is no minion with the master role.")
        if not self.deepsea_minions:
            self.deepsea_minions = '*'
+
+    def get_global_conf(self):
+        return self.cfg('/srv/pillar/ceph/stack/global.yml').read_()
+
+    def write_global_conf(self, content):
+        self.cfg('/srv/pillar/ceph/stack/global.yml').write_(content)
+
+    def get_cluster_conf(self, cluster_name):
+        return self.cfg('/srv/pillar/ceph/stack/{}/cluster.yml'.format(cluster_name)).read_()
+
+    def write_cluster_conf(self, cluster_name, content):
+        self.cfg('/srv/pillar/ceph/stack/{}/cluster.yml'.format(cluster_name)).write_(content)
 
     def deepsea_minions(self):
         return self.local.cmd(self.master_minion, 'pillar.get', ['deepsea_minions'], expr_form="compound").values()[0]
@@ -117,14 +119,13 @@ class Cluster(object):
         self._selected_node = None
         # load existing cluster
         self._layout = {}
-        self.settings = Settings()
-        self.cfg = Config()
+        self.cfg = Cfg
         self.local = salt.client.LocalClient()
         self._selections = []
         self._hosts = []
         self._roles = []
         self._clusters = []
-        self._conf_options = {}
+        self._global_options = {}
 
     @property
     def hosts(self):
@@ -135,14 +136,26 @@ class Cluster(object):
         self._hosts = hosts
 
     @property
-    def config_options(self):
-        # later with salt
-        return self._conf_options
+    def global_options(self):
+        return self._global_options
 
-    @config_options.setter
-    def config_options(self, opts):
-        # later with salt
-        self._conf_options = opts
+    @global_options.setter
+    def global_options(self, opts):
+        self._global_options = opts
+
+    @property
+    def role_options(self):
+        return {'data1': {'public_addr': '10.10.10.10.10.10'}}
+#        # That sucks.
+#        if role == 'storage':
+#            #                                 # STATIC                                     # STATIC
+#            path = '/srv/pillar/ceph/proposals/profile-default/stack/default/ceph/minions/data1.ceph.yml'.format(role)
+#        else:
+#            path = '/srv/pillar/ceph/proposals/role-{}/stack/default/ceph/minions/admin.ceph.yml'.format(role)
+#        if os.path.exists(path):
+#            return self.cfg(path).read_()
+#        else:
+#            return "No Config options found"
 
     @property
     def roles(self):
@@ -215,14 +228,20 @@ class Cluster(object):
 
 cl = Cluster()
 clcl = cl
-cfg = Config()
+cfg = Settings()
 cl.layout = cfg.get_roles()
 cl.clusters = cfg.get_clusters()
 cl.roles = cfg.get_available_roles()
 cl.hosts = cfg.get_hosts()
-cl.config_options = {'config1': 'val1', 'config2': 'val2', 'config3': 'val3'}
+#                   replace with call
+cluster_conf = cfg.get_cluster_conf('ceph')
+cluster_conf['foo'] = 'not_bar'
+global_conf = cfg.get_global_conf()
+global_conf['stage_prep_minion'] = 'nope'
+cfg.write_global_conf(global_conf)
+cfg.write_cluster_conf('ceph', cluster_conf)
+cl.global_options = cfg.get_global_conf()
 
-import pdb;pdb.set_trace()
 
 def register_position(widget_obj):
     logging.info(widget_obj.label)
@@ -296,7 +315,7 @@ def item_chosen(button):
 def item_edit(button):
     config_option = button.label
     text_edit_cap1 = ('editcp', u"{}: ".format(button.label))
-    config_value = cl.config_options[button.label]
+    config_value = cl.global_options[button.label]
     text_edit_text1 = u"{}".format(config_value)
     #ask = urwid.AttrWrap(urwid.Edit(text_edit_cap1, text_edit_text1), 'editbx', 'editfc')
     ask = urwid.Edit(text_edit_cap1, text_edit_text1)
@@ -313,18 +332,47 @@ def item_edit(button):
     user_data = {'key': config_option, 'value': reply}
     urwid.connect_signal(button, 'click', save_config_option, user_data)
     topo = urwid.Filler(pile, valign='top')
+    top.open_box(topo)
 
+# rework
+def item_edit_role(button):
+    config_option = button.label
+    text_edit_cap1 = ('editcp', u"{}: ".format(button.label))
+
+    role = cl.find_role_name()
+    host = cl.find_node_name()
+
+    config_value = cl.role_options[host][button.label]
+    text_edit_text1 = u"{}".format(config_value)
+    #ask = urwid.AttrWrap(urwid.Edit(text_edit_cap1, text_edit_text1), 'editbx', 'editfc')
+    ask = urwid.Edit(text_edit_cap1, text_edit_text1)
+    button = urwid.Button(u'Save')
+    reply = urwid.Text(u'')
+    div = urwid.Divider()
+    pile = urwid.Pile([ask, div, reply, div, button])
+    #
+    def on_ask_change(edit, new_edit_text):
+        reply.set_text(new_edit_text)
+    # Decorations of Edit -> AttrWrap can not be connected to signals
+
+    urwid.connect_signal(ask, 'change', on_ask_change)
+
+    user_data = {'key': config_option, 'value': reply, 'role': role, 'host': host}
+    urwid.connect_signal(button, 'click', save_config_option, user_data)
+    topo = urwid.Filler(pile, valign='top')
     top.open_box(topo)
 
 def save_config_option(obj, user_data):
     if user_data['value'].text != '':
-        if user_data['key'] in cl.config_options:
-            cl.config_options[user_data['key']] = user_data['value'].text
+        if user_data['key'] in cl.global_options:
+            cl.global_options[user_data['key']] = str(user_data['value'].text)
         else:
             logging.info('handle this case')
         logging.info('user_data: {}'.format(user_data))
         logging.info('Saved config option successfully. new value: {}'.format(user_data['value'].text))
-        logging.info(cl.config_options)
+        logging.info(cl.global_options)
+        cfg.write_global_conf(cl.global_options)
+        # Add a popup
     else:
         logging.info('No Change in configuration. Not saving.')
 
@@ -365,17 +413,14 @@ menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster',
                                                       sub_menu(u'{}'.format(role), [ 
                                                           menu_button(u'Assigned Hosts', host_selector_callback),
                                                           sub_menu(u'Config for Role', [ 
-                                                              menu_button(u'config1', item_edit), 
-                                                              menu_button(u'config2', item_edit)
-                                                                 ]), 
+                                                              menu_button(u'{}'.format(config_option), item_edit_role) for config_option in cl.role_options]), 
                                                               ]) for role in cl.roles ]), 
                                               sub_menu(u'Cluster Config', [
-                                                  menu_button(u'config1', item_edit), 
-                                                  menu_button(u'config2', item_edit)]), 
+                                                  menu_button(u'{}'.format(config_option), item_edit_role) for config_option in cl.role_options]), 
                                               sub_menu(u'Hosts', [ 
                                                   sub_menu(u'{}'.format(host), [ 
                                                       sub_menu(u'Host options', [ 
-                                                          menu_button(u'{}'.format(config_option), item_edit) for config_option in cl.config_options ]), 
+                                                          menu_button(u'{}'.format(config_option), item_edit) for config_option in cl.global_options]), 
                                                       menu_button(u'Role Selector', role_selector_callback)
                                                           ]) for host in cl.hosts ]),
                                                  ]) for cluster_name in cl.clusters

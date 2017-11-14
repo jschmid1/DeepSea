@@ -3,7 +3,7 @@ import logging
 import salt.client
 import yaml
 import os
-logging.basicConfig(filename='/root/example.log',level=logging.DEBUG)
+logging.basicConfig(filename='example.log', level=logging.INFO)
 
 """ 
 TODO:
@@ -46,9 +46,18 @@ class Node(object):
 class Role(object):
     def __init__(self, name):
         self.name = name
+        self.cfg = Cfg
+        self.config_path = self.path()
 
-    def config_path(self):
-        pass
+    def path(self):
+        # except storage
+        return "/srv/salt/ceph/configuration/files/ceph.conf.d/{}.conf".format(self.name)
+
+    def read_conf(self):
+        if os.path.exists(self.config_path):
+            return self.cfg(self.config_path).read_()
+        else:
+            return ""
 
 class Cfg(object):
 
@@ -63,23 +72,25 @@ class Cfg(object):
         with open(self.filename, 'r') as _fd:
             return yaml.load(_fd)
 
-#       rename -> SaltGet
 class Settings(object):
 
     def __init__(self):
         self.cfg = Cfg
         self.local = salt.client.LocalClient()
         self.master_minion = self.get_master()
-        self.deepsea_minions = self.deepsea_minions()
+        self.target_all = self.deepsea_minions()
         self.pre_check()
 
     def pre_check(self):
        if not self.master_minion:
            raise ImportError("There is no minion with the master role.")
        if not self.deepsea_minions:
+           # actually raise
            self.deepsea_minions = '*'
 
     def get_global_conf(self):
+        # maybe return the instance instead of the object.
+        # the caller can invoke .read and .wirte himself.
         return self.cfg('/srv/pillar/ceph/stack/global.yml').read_()
 
     def write_global_conf(self, content):
@@ -92,25 +103,28 @@ class Settings(object):
         self.cfg('/srv/pillar/ceph/stack/{}/cluster.yml'.format(cluster_name)).write_(content)
 
     def deepsea_minions(self):
-        return self.local.cmd(self.master_minion, 'pillar.get', ['deepsea_minions'], expr_form="compound").values()[0]
+        return self.call_salt(self.master_minion, 'deepsea_minions').values()[0]
 
     def get_master(self):
         # Thats not very nice. Parse the file and check for the pillar data to be set..
         # this is TODO
-        return self.local.cmd('*', 'pillar.get', ['master_minion'], expr_form="compound").values()[0]
+        return self.call_salt('*', 'master_minion').values()[0]
 
     def get_roles(self):
-        return self.local.cmd('*', 'pillar.get', ['roles'], expr_form="compound")
+        return self.call_salt(self.target_all, 'roles')
 
     def get_hosts(self):
         # make this more lightweight
         return self.get_roles().keys()
 
     def get_available_roles(self):
-        return self.local.cmd(self.master_minion, 'pillar.get', ['available_roles'], expr_form="compound").values()[0]
+        return self.call_salt(self.master_minion, 'available_roles').values()[0]
 
     def get_clusters(self):
-        return self.local.cmd(self.master_minion, 'pillar.get', ['cluster'], expr_form="compound").values()
+        return self.call_salt(self.master_minion, 'cluster').values()
+
+    def call_salt(self, target, item, cmd='pillar.get', expr_form='compound'):
+        return self.local.cmd(target, cmd, [item], expr_form=expr_form)
 
 
 class Cluster(object):
@@ -120,12 +134,15 @@ class Cluster(object):
         # load existing cluster
         self._layout = {}
         self.cfg = Cfg
+        self.role = Role
+        self.node = Node
         self.local = salt.client.LocalClient()
         self._selections = []
         self._hosts = []
         self._roles = []
         self._clusters = []
         self._global_options = {}
+        self._cluster_options = {}
 
     @property
     def hosts(self):
@@ -144,18 +161,15 @@ class Cluster(object):
         self._global_options = opts
 
     @property
-    def role_options(self):
-        return {'data1': {'public_addr': '10.10.10.10.10.10'}}
-#        # That sucks.
-#        if role == 'storage':
-#            #                                 # STATIC                                     # STATIC
-#            path = '/srv/pillar/ceph/proposals/profile-default/stack/default/ceph/minions/data1.ceph.yml'.format(role)
-#        else:
-#            path = '/srv/pillar/ceph/proposals/role-{}/stack/default/ceph/minions/admin.ceph.yml'.format(role)
-#        if os.path.exists(path):
-#            return self.cfg(path).read_()
-#        else:
-#            return "No Config options found"
+    def cluster_options(self):
+        return self._cluster_options
+
+    @cluster_options.setter
+    def cluster_options(self, opts):
+        self._cluster_options = opts
+
+    def role_options(self, role_name):
+        return self.role(role_name).read_conf()
 
     @property
     def roles(self):
@@ -200,6 +214,7 @@ class Cluster(object):
         # a 'bit' hacky..
         node_name = set(self.hosts).intersection(self.selections).pop()
         logging.debug('Operating on node: {}'.format(node_name))
+        # return the Node object here.
         # raise if None
         return node_name
 
@@ -207,6 +222,7 @@ class Cluster(object):
         # a 'bit' hacky..
         role_name = set(self.roles).intersection(self.selections).pop()
         logging.debug('Operating on role: {}'.format(role_name))
+        # return the Role object here.
         # raise if None
         return role_name
 
@@ -224,23 +240,6 @@ class Cluster(object):
             if role in roles:
                 nodes.append(node)
         return nodes
-
-
-cl = Cluster()
-clcl = cl
-cfg = Settings()
-cl.layout = cfg.get_roles()
-cl.clusters = cfg.get_clusters()
-cl.roles = cfg.get_available_roles()
-cl.hosts = cfg.get_hosts()
-#                   replace with call
-cluster_conf = cfg.get_cluster_conf('ceph')
-cluster_conf['foo'] = 'not_bar'
-global_conf = cfg.get_global_conf()
-global_conf['stage_prep_minion'] = 'nope'
-cfg.write_global_conf(global_conf)
-cfg.write_cluster_conf('ceph', cluster_conf)
-cl.global_options = cfg.get_global_conf()
 
 
 def register_position(widget_obj):
@@ -330,19 +329,23 @@ def item_edit(button):
 
     urwid.connect_signal(ask, 'change', on_ask_change)
     user_data = {'key': config_option, 'value': reply}
-    urwid.connect_signal(button, 'click', save_config_option, user_data)
+    urwid.connect_signal(button, 'click', save_global_config_option, user_data)
     topo = urwid.Filler(pile, valign='top')
     top.open_box(topo)
 
-# rework
-def item_edit_role(button):
+def saved_callback(obj):
+    saved_flag = ('key', " SAVED")
+    if saved_flag not in footer_text:
+        footer_text.append(saved_flag)
+        footer = urwid.AttrMap(urwid.Text(footer_text), 'foot')
+        view.footer = footer
+
+# refactor to be more generic
+def item_edit_cluster(button):
     config_option = button.label
     text_edit_cap1 = ('editcp', u"{}: ".format(button.label))
 
-    role = cl.find_role_name()
-    host = cl.find_node_name()
-
-    config_value = cl.role_options[host][button.label]
+    config_value = cl.cluster_options[button.label]
     text_edit_text1 = u"{}".format(config_value)
     #ask = urwid.AttrWrap(urwid.Edit(text_edit_cap1, text_edit_text1), 'editbx', 'editfc')
     ask = urwid.Edit(text_edit_cap1, text_edit_text1)
@@ -356,13 +359,29 @@ def item_edit_role(button):
     # Decorations of Edit -> AttrWrap can not be connected to signals
 
     urwid.connect_signal(ask, 'change', on_ask_change)
-
-    user_data = {'key': config_option, 'value': reply, 'role': role, 'host': host}
-    urwid.connect_signal(button, 'click', save_config_option, user_data)
+    #                                                                       # STATIC, change
+    user_data = {'key': config_option, 'value': reply, 'type': 'cluster', 'cluster': 'ceph'}
+    urwid.connect_signal(button, 'click', save_cluster_config_option, user_data)
     topo = urwid.Filler(pile, valign='top')
     top.open_box(topo)
 
-def save_config_option(obj, user_data):
+# should be moved to Cfg
+def save_cluster_config_option(obj, user_data):
+    if user_data['value'].text != '':
+        if user_data['key'] in cl.cluster_options:
+            cl.cluster_options[user_data['key']] = str(user_data['value'].text)
+        else:
+            logging.info('handle this case')
+        logging.info('user_data: {}'.format(user_data))
+        logging.info('Saved config option successfully. new value: {}'.format(user_data['value'].text))
+        logging.info(cl.cluster_options)
+        
+        cfg.write_cluster_conf(user_data['cluster'], cl.cluster_options)
+        saved_callback('ok')
+    else:
+        logging.info('No Change in configuration. Not saving.')
+
+def save_global_config_option(obj, user_data):
     if user_data['value'].text != '':
         if user_data['key'] in cl.global_options:
             cl.global_options[user_data['key']] = str(user_data['value'].text)
@@ -371,8 +390,9 @@ def save_config_option(obj, user_data):
         logging.info('user_data: {}'.format(user_data))
         logging.info('Saved config option successfully. new value: {}'.format(user_data['value'].text))
         logging.info(cl.global_options)
+        
         cfg.write_global_conf(cl.global_options)
-        # Add a popup
+        saved_callback('ok')
     else:
         logging.info('No Change in configuration. Not saving.')
 
@@ -406,6 +426,22 @@ def exit_program(button):
     raise urwid.ExitMainLoop()
 
 
+
+cl = Cluster()
+clcl = cl
+cfg = Settings()
+
+def load_from_salt():
+
+    cl.layout = cfg.get_roles()
+    cl.clusters = cfg.get_clusters()
+    cl.roles = cfg.get_available_roles()
+    cl.hosts = cfg.get_hosts()
+    cl.global_options = cfg.get_global_conf()
+    cl.cluster_options = cfg.get_cluster_conf('ceph')
+
+load_from_salt()
+
 menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster', 
                                          [ 
                                           sub_menu(u'{}'.format(cluster_name), [ 
@@ -413,10 +449,10 @@ menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster',
                                                       sub_menu(u'{}'.format(role), [ 
                                                           menu_button(u'Assigned Hosts', host_selector_callback),
                                                           sub_menu(u'Config for Role', [ 
-                                                              menu_button(u'{}'.format(config_option), item_edit_role) for config_option in cl.role_options]), 
+                                                              menu_button(u'{}'.format(config_option), item_edit) for config_option in cl.global_options]), 
                                                               ]) for role in cl.roles ]), 
                                               sub_menu(u'Cluster Config', [
-                                                  menu_button(u'{}'.format(config_option), item_edit_role) for config_option in cl.role_options]), 
+                                                  menu_button(u'{}'.format(config_option), item_edit_cluster) for config_option in cl.cluster_options]), 
                                               sub_menu(u'Hosts', [ 
                                                   sub_menu(u'{}'.format(host), [ 
                                                       sub_menu(u'Host options', [ 
@@ -426,9 +462,9 @@ menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster',
                                                  ]) for cluster_name in cl.clusters
                                           ]), 
                                 sub_menu(u'Global Configs', 
-                                        [ sub_menu(u'Preferences', [ 
-                                            menu_button(u'Dummy', item_chosen), ]), 
-                                            menu_button(u'Dummy', item_chosen), ]), 
+                                        [ sub_menu(u'Dummy', [ 
+                                            menu_button(u'{}'.format(config_option), item_edit) for config_option in cl.global_options])
+                                         ]),
                                         ]) 
 
 class CascadingBoxes(urwid.WidgetPlaceholder):
@@ -456,39 +492,44 @@ class CascadingBoxes(urwid.WidgetPlaceholder):
             self.original_widget = self.original_widget[0]
             self.box_level -= 1
             cl.pop_from_selection()
+            default_footer()
         else:
             return super(CascadingBoxes, self).keypress(size, key)
 
+def default_footer():
+    saved_flag = ('key', " SAVED")
+    if saved_flag in footer_text:
+        footer_text.remove(saved_flag)
+        footer = urwid.AttrMap(urwid.Text(footer_text), 'foot')
+        view.footer = footer
+
 #import pdb;pdb.set_trace()
+urwid.command_map['h'] = urwid.CURSOR_LEFT
+urwid.command_map['j'] = urwid.CURSOR_DOWN
+urwid.command_map['k'] = urwid.CURSOR_UP
+urwid.command_map['l'] = urwid.CURSOR_RIGHT
+palette = [
+    ('body','black','dark cyan', 'standout'),
+    ('foot','light gray', 'black'),
+    ('key','light cyan', 'black', 'underline'),
+    ('title', 'white', 'black',),
+    ('editfc','white', 'dark blue', 'bold'),
+    ('editbx','light gray', 'dark blue'),
+    ('editcp','black','light gray', 'standout'),
+    ]
+
+footer_text = [
+    ('title', "SES Configurator"), "    ",
+    ('key', "UP, j"), ", ", ('key', "DOWN, k"), ", ",
+    ('key', "PAGE UP"), " and ", ('key', "PAGE DOWN"),
+    " move view  ",
+    ('key', "Q"), " exits or moves one layer down",
+    ]
+header_text = ('title', "SES Configurator")
+
+footer = urwid.AttrMap(urwid.Text(footer_text), 'foot')
+header = urwid.AttrMap(urwid.Text(header_text), 'header')
 top = CascadingBoxes(menu_top)
-def main():
-    urwid.command_map['h'] = urwid.CURSOR_LEFT
-    urwid.command_map['j'] = urwid.CURSOR_DOWN
-    urwid.command_map['k'] = urwid.CURSOR_UP
-    urwid.command_map['l'] = urwid.CURSOR_RIGHT
-    palette = [
-        ('body','black','dark cyan', 'standout'),
-        ('foot','light gray', 'black'),
-        ('key','light cyan', 'black', 'underline'),
-        ('title', 'white', 'black',),
-        ('editfc','white', 'dark blue', 'bold'),
-        ('editbx','light gray', 'dark blue'),
-        ('editcp','black','light gray', 'standout'),
-        ]
-
-    footer_text = [
-        ('title', "SES Configurator"), "    ",
-        ('key', "UP, j"), ", ", ('key', "DOWN, k"), ", ",
-        ('key', "PAGE UP"), " and ", ('key', "PAGE DOWN"),
-        " move view  ",
-        ('key', "Q"), " exits or moves one layer down",
-        ]
-    header_text = ('title', "SES Configurator")
-
-    footer = urwid.AttrMap(urwid.Text(footer_text), 'foot')
-    header = urwid.AttrMap(urwid.Text(header_text), 'header')
-    view = urwid.Frame(top, footer=footer, header=header)
-    loop = urwid.MainLoop(view, palette)
-    loop.run()
-
-main()
+view = urwid.Frame(top, footer=footer, header=header)
+loop = urwid.MainLoop(view, palette)
+loop.run()

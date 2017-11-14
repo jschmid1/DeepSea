@@ -1,24 +1,134 @@
 import urwid
 import logging
+import salt.client
 logging.basicConfig(filename='example.log',level=logging.DEBUG)
+
+""" 
+TODO:
+
+Create a Config() class that implements a .save()
+and .load() functions for diverse config options
+
+Options may parsed out of files located in different locations
+
+/srv/pillar/ceph/
+/srv/pillar/ceph/cluster/
+/srv/pillar/ceph/cluster/stack/global.cfg
+/srv/pillar/ceph/cluster/stack/ceph/
+/srv/pillar/ceph/cluster/stack/ceph/cluster.yml
+/srv/pillar/ceph/cluster/stack/default/ceph/cluster.yml
+
+Maybe we should add pre-loaded options for init.sls I need
+to parse all dirs under /srv/salt/ceph/
+
+Global 'Host' configurations might be set for.
+
+/etc/sysctl.conf
+
+"""
+
+class Settings(object):
+    """
+    Common settings
+    """
+
+    def __init__(self):
+        """
+        Assign root_dir, salt __opts__ and stack configuration.  (Stack
+        configuration is not used currently.)
+        """
+        __opts__ = salt.config.client_config('/etc/salt/master')
+        self.__opts__ = __opts__
+
+        for ext in __opts__['ext_pillar']:
+            if 'stack' in ext:
+                self.stack = ext['stack']
+        self.root_dir = "/srv/pillar/ceph/proposals"
+
+class SaltWriter(object):
+    """
+    All salt files are essentially yaml files in the pillar by default.  The
+    pillar uses sls extensions and stack.py uses yml.
+    """
+
+    def __init__(self, **kwargs):
+        """
+        Keep yaml human readable/editable.  Disable yaml references.
+        """
+        self.dumper = yaml.SafeDumper
+        self.dumper.ignore_aliases = lambda self, data: True
+
+        if 'overwrite' in kwargs:
+            self.overwrite = kwargs['overwrite']
+        else:
+            self.overwrite = False
+
+    def write(self, filename, contents):
+        """
+        Write a yaml file in the conventional way
+        """
+        if self.overwrite or not os.path.isfile(filename):
+            log.info("Writing {}".format(filename))
+            with open(filename, "w") as yml:
+                yml.write(yaml.dump(contents, Dumper=self.dumper,
+                          default_flow_style=False))
+
+class Config(object):
+
+    def __init__(self):
+        self.settings = Settings()
+        self.local = salt.client.LocalClient()
+        self.master_minion = self.get_master()
+        self.deepsea_minions = self.deepsea_minions()
+        # get from pillar
+        self.pre_check()
+
+    def pre_check(self):
+       if not self.master_minion:
+           raise ImportError("There is no minion with the master role.")
+       if not self.deepsea_minions:
+           self.deepsea_minions = '*'
+
+    def deepsea_minions(self):
+        return self.local.cmd(self.master_minion, 'pillar.get', ['deepsea_minions'], expr_form="compound").values()[0]
+
+    def get_master(self):
+        # Thats not very nice. Parse the file and check for the pillar data to be set..
+        # this is TODO
+        return self.local.cmd('*', 'pillar.get', ['master_minion'], expr_form="compound").values()[0]
+
+    def get_roles(self):
+        return self.local.cmd('*', 'pillar.get', ['roles'], expr_form="compound")
+
+    def get_hosts(self):
+        # make this more lightweight
+        return self.get_roles().keys()
+
+    def get_available_roles(self):
+        return self.local.cmd(self.master_minion, 'pillar.get', ['available_roles'], expr_form="compound").values()[0]
+
+    def get_clusters(self):
+        return self.local.cmd(self.master_minion, 'pillar.get', ['cluster'], expr_form="compound").values()
+
 
 class Cluster(object):
     
     def __init__(self):
         self._selected_node = None
-        self._layout = { 'node1': [ u'MDS', u'MON' ],
-                         'node2': [ u'MON' ],
-                         'node3': [ u'OSD' ]
-                       }
         # load existing cluster
+        self._layout = {}
+        self.settings = Settings()
+        self.cfg = Config()
+        self.local = salt.client.LocalClient()
         self._selections = []
         self._hosts = []
         self._roles = []
+        self._clusters = []
         self._conf_options = {}
 
     @property
     def hosts(self):
-        return [ "node{}".format(x) for x in range(1,4)]
+        return self._hosts
 
     @hosts.setter
     def hosts(self, hosts):
@@ -40,7 +150,6 @@ class Cluster(object):
 
     @roles.setter
     def roles(self, roles):
-        #  later with salt
         self._roles = roles
 
     @property
@@ -58,10 +167,14 @@ class Cluster(object):
         if len(self._selections) >= 1:
             self._selections.pop()
 
+    @property
     def clusters(self):
-        # dummy
-        return ['ceph', 'foo']
+        return self._clusters
 
+    @clusters.setter
+    def clusters(self, clusters):
+        self._clusters = clusters
+        
     @property
     def layout(self):
         return self._layout
@@ -73,12 +186,14 @@ class Cluster(object):
     def find_node_name(self):
         # a 'bit' hacky..
         node_name = set(self.hosts).intersection(self.selections).pop()
+        logging.debug('Operating on node: {}'.format(node_name))
         # raise if None
         return node_name
 
     def find_role_name(self):
         # a 'bit' hacky..
         role_name = set(self.roles).intersection(self.selections).pop()
+        logging.debug('Operating on role: {}'.format(role_name))
         # raise if None
         return role_name
 
@@ -99,6 +214,15 @@ class Cluster(object):
 
 
 cl = Cluster()
+clcl = cl
+cfg = Config()
+cl.layout = cfg.get_roles()
+cl.clusters = cfg.get_clusters()
+cl.roles = cfg.get_available_roles()
+cl.hosts = cfg.get_hosts()
+cl.config_options = {'config1': 'val1', 'config2': 'val2', 'config3': 'val3'}
+
+import pdb;pdb.set_trace()
 
 def register_position(widget_obj):
     logging.info(widget_obj.label)
@@ -142,27 +266,16 @@ def host_selector_callback(button):
 
 def role_selector_callback(button):
     response = urwid.Text([u'You chose ', button.label, u'\n'])
-    check_box_mon = urwid.CheckBox(u"MON")
-    check_box_mds = urwid.CheckBox(u"MDS")
-    check_box_rgw = urwid.CheckBox(u"RGW")
-    check_box_osd = urwid.CheckBox(u"OSD")
+    args_to_open_box = [response]
     node_name = cl.find_node_name()
-    layout = cl.layout[node_name]
-    for role in layout:
-        if role == u'MON':
-            check_box_mon.set_state(True)
-        elif role == u'MDS':
-            check_box_mds.set_state(True)
-        elif role == u'RGW':
-            check_box_rgw.set_state(True)
-        elif role == u'OSD':
-            check_box_osd.set_state(True)
-    user_data = button.label
-    urwid.connect_signal(check_box_mon, 'change', register_change, user_data)
-    urwid.connect_signal(check_box_mds, 'change', register_change, user_data)
-    urwid.connect_signal(check_box_rgw, 'change', register_change, user_data)
-    urwid.connect_signal(check_box_osd, 'change', register_change, user_data)
-    top.open_box(urwid.Filler(urwid.Pile([response, check_box_mon, check_box_mds, check_box_rgw, check_box_osd])))
+    for role in cl.roles:
+        check_box_role = urwid.CheckBox(u"{}".format(role))
+        if role in cl.layout[node_name]:
+            check_box_role.set_state(True)
+        user_data = button.label
+        urwid.connect_signal(check_box_role, 'change', register_change, user_data)
+        args_to_open_box.append(check_box_role)
+    top.open_box(urwid.Filler(urwid.Pile(args_to_open_box)))
 
 def conf_selector_callback(button):
     response = urwid.Text([u'You chose ', button.label, u'\n'])
@@ -183,38 +296,37 @@ def item_chosen(button):
 def item_edit(button):
     config_option = button.label
     text_edit_cap1 = ('editcp', u"{}: ".format(button.label))
-    text_edit_text1 = u"The config option that was parsed from salt"
+    config_value = cl.config_options[button.label]
+    text_edit_text1 = u"{}".format(config_value)
     #ask = urwid.AttrWrap(urwid.Edit(text_edit_cap1, text_edit_text1), 'editbx', 'editfc')
     ask = urwid.Edit(text_edit_cap1, text_edit_text1)
     button = urwid.Button(u'Save')
     reply = urwid.Text(u'')
     div = urwid.Divider()
     pile = urwid.Pile([ask, div, reply, div, button])
-    # This section seems hacky, I just want to pass the edited text
-    # to the save_config_option callback. reply.get_text() seems to be empty
-    config_setting = ""
+    #
     def on_ask_change(edit, new_edit_text):
         reply.set_text(new_edit_text)
-    logging.info('Inside_item_edit reply is: {}'.format(reply.text))
     # Decorations of Edit -> AttrWrap can not be connected to signals
-    # EOC
 
     urwid.connect_signal(ask, 'change', on_ask_change)
     user_data = {'key': config_option, 'value': reply}
     urwid.connect_signal(button, 'click', save_config_option, user_data)
     topo = urwid.Filler(pile, valign='top')
-    logging.info('Inside_item_edit reply is: {}'.format(reply.text))
 
     top.open_box(topo)
 
 def save_config_option(obj, user_data):
-    if user_data['key'] in cl.config_options:
-        cl.config_options[user_data['key']] = user_data['value'].text
+    if user_data['value'].text != '':
+        if user_data['key'] in cl.config_options:
+            cl.config_options[user_data['key']] = user_data['value'].text
+        else:
+            logging.info('handle this case')
+        logging.info('user_data: {}'.format(user_data))
+        logging.info('Saved config option successfully. new value: {}'.format(user_data['value'].text))
+        logging.info(cl.config_options)
     else:
-        logging.info('handle this case')
-    logging.info('user_data: {}'.format(user_data))
-    logging.info('Saved config option successfully. new value: {}'.format(user_data['value'].text))
-    logging.info(cl.config_options)
+        logging.info('No Change in configuration. Not saving.')
 
 # rename register_role_change
 def register_change(obj, dunno, node_name):
@@ -245,15 +357,6 @@ def register_host_change(obj, dunno, node_name):
 def exit_program(button):
     raise urwid.ExitMainLoop()
 
-clcl = cl
-# for pdb
-
-all_hosts = cl.hosts
-all_clusters = cl.clusters()
-cl.roles = ['MON', 'OSD', 'MDS', 'RGW', 'IGW', 'NFS-GANESHA', 'OPENATTIC']
-all_roles = cl.roles
-cl.config_options = {'config1': 'val1', 'config2': 'val2', 'config3': 'val3'}
-all_config_options = cl.config_options
 
 menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster', 
                                          [ 
@@ -265,17 +368,17 @@ menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster',
                                                               menu_button(u'config1', item_edit), 
                                                               menu_button(u'config2', item_edit)
                                                                  ]), 
-                                                              ]) for role in all_roles ]), 
+                                                              ]) for role in cl.roles ]), 
                                               sub_menu(u'Cluster Config', [
                                                   menu_button(u'config1', item_edit), 
                                                   menu_button(u'config2', item_edit)]), 
                                               sub_menu(u'Hosts', [ 
                                                   sub_menu(u'{}'.format(host), [ 
                                                       sub_menu(u'Host options', [ 
-                                                          menu_button(u'{}'.format(config_option), item_edit) for config_option in all_config_options]), 
+                                                          menu_button(u'{}'.format(config_option), item_edit) for config_option in cl.config_options ]), 
                                                       menu_button(u'Role Selector', role_selector_callback)
-                                                          ]) for host in all_hosts ]),
-                                                 ]) for cluster_name in all_clusters
+                                                          ]) for host in cl.hosts ]),
+                                                 ]) for cluster_name in cl.clusters
                                           ]), 
                                 sub_menu(u'Global Configs', 
                                         [ sub_menu(u'Preferences', [ 

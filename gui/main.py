@@ -44,20 +44,6 @@ logger = logging.getLogger(__name__)
 
 _setup_logging()
 
-class Node(object):
-    def __init__(self, name):
-        self.name = name
-        self._roles = None
-    
-    @property
-    def roles(self):
-        return self._roles
-
-    @roles.setter
-    def roles(self, role):
-        self._roles = roles
-
-
 class Role(object):
     def __init__(self, name):
         if name == 'storage':
@@ -71,13 +57,15 @@ class Role(object):
 
     def read_conf(self):
         if os.path.exists(self.config_path):
-            return self.cfg(self.config_path, mode='ceph').read_()
+            return self.cfg(self.config_path, mode='ceph').read()
         else:
             return ""
 
     def write_conf(self, content):
         if os.path.exists(self.config_path):
-            return self.cfg(self.config_path, mode='ceph').write_(content)
+            return self.cfg(self.config_path, mode='ceph').write(content)
+        else:
+            logging.error('No config path found in {}'.format(self.config_path))
 
 
 class Cfg(object):
@@ -85,8 +73,9 @@ class Cfg(object):
     def __init__(self, filename=None, mode='yaml'):
         self.mode = mode
         self.filename = filename
+        # Cfg should implement the os.path.exists
 
-    def write_(self, content):
+    def write(self, content):
         with open(self.filename, 'w') as _fd:
             if self.mode == 'yaml':
                 _fd.write(yaml.dump(content))
@@ -98,7 +87,7 @@ class Cfg(object):
             else:
                 raise IOError('Dont know how to handle parsing mode {}'.format(mode))
             
-    def read_(self):
+    def read(self):
         with open(self.filename, 'r') as _fd:
             if self.mode == 'yaml':
                 return yaml.load(_fd)
@@ -129,19 +118,12 @@ class Settings(object):
            # actually raise
            self.deepsea_minions = '*'
 
-    def get_global_conf(self):
-        # maybe return the instance instead of the object.
-        # the caller can invoke .read and .wirte himself.
-        return self.cfg('/srv/pillar/ceph/stack/global.yml').read_()
+    @property
+    def global_conf(self):
+        return self.cfg('/srv/pillar/ceph/stack/global.yml')
 
-    def write_global_conf(self, content):
-        self.cfg('/srv/pillar/ceph/stack/global.yml').write_(content)
-
-    def get_cluster_conf(self, cluster_name):
-        return self.cfg('/srv/pillar/ceph/stack/{}/cluster.yml'.format(cluster_name)).read_()
-
-    def write_cluster_conf(self, cluster_name, content):
-        self.cfg('/srv/pillar/ceph/stack/{}/cluster.yml'.format(cluster_name)).write_(content)
+    def cluster_conf(self, cluster_name):
+        return self.cfg('/srv/pillar/ceph/stack/{}/cluster.yml'.format(cluster_name))
 
     def deepsea_minions(self):
         return self.call_salt(self.master_minion, 'deepsea_minions').values()[0]
@@ -172,11 +154,10 @@ class Cluster(object):
     
     def __init__(self):
         self._selected_node = None
-        # load existing cluster
         self._layout = {}
         self.cfg = Cfg
+        self.salt = Settings()
         self.role = Role
-        self.node = Node
         self.local = salt.client.LocalClient()
         self._selections = []
         self._hosts = []
@@ -268,7 +249,10 @@ class Cluster(object):
         return role_name
 
     def layout_diff(self):
-        pass
+        curr = self.salt.get_roles()
+        new = self.layout
+        diff = Helper.dict_diff(curr, new)
+        return diff 
 
     def reverse_view(self):
         # show roles that list nodes
@@ -309,8 +293,7 @@ def host_selector_callback(button):
     logging.info(cl.layout)
     hosts = cl.reverse_view()
     if not hosts:
-        response = urwid.Text([u'There are no hosts assigned to this Role'])
-        # FIXME: Q,ESC does not work here
+        response = urwid.Button(u'There are no hosts assigned to this Role')
     arg_to_open_box = [response]
     for host in hosts:
         user_data = button.label
@@ -332,7 +315,7 @@ def role_selector_callback(button):
         if role in cl.layout[node_name]:
             check_box_role.set_state(True)
         user_data = button.label
-        urwid.connect_signal(check_box_role, 'change', register_change, user_data)
+        urwid.connect_signal(check_box_role, 'change', register_role_change, user_data)
         args_to_open_box.append(check_box_role)
     top.open_box(urwid.Filler(urwid.Pile(args_to_open_box)))
 
@@ -378,6 +361,19 @@ def item_edit_role(button):
     topo = urwid.Filler(pile, valign='top')
     top.open_box(topo)
 
+def layout_diff(button):
+    config_option = button.label
+    diff = cl.layout_diff()
+    text = urwid.Text(str(diff))
+    div = urwid.Divider()
+    save = urwid.Button(u'Save')
+    #urwid.connect_signal(save, 'click', save_role_change, user_data)
+    reset = urwid.Button(u'Reset')
+    #urwid.connect_signal(reset, 'click', reset_role_change, user_data)
+    pile = urwid.Pile([text, div, save, reset])
+    topo = urwid.Filler(pile, valign='top')
+    top.open_box(topo)
+
 def item_edit(button):
     config_option = button.label
     text_edit_cap1 = ('editcp', u"{}: ".format(button.label))
@@ -407,6 +403,13 @@ def saved_callback(obj):
         footer = urwid.AttrMap(urwid.Text(footer_text), 'foot')
         view.footer = footer
 
+def error_saving_callback(obj):
+    error_flag = ('error', " Error saving")
+    if error_flag not in header_text:
+        header_text.append(error_flag)
+        header = urwid.AttrMap(urwid.Text(header_text), 'header')
+        view.header = header
+
 # refactor to be more generic
 def item_edit_cluster(button):
     config_option = button.label
@@ -434,17 +437,22 @@ def item_edit_cluster(button):
 
 # should be moved to Cfg
 def save_cluster_config_option(obj, user_data):
-    if user_data['value'].text != '':
-        if user_data['key'] in cl.cluster_options:
-            cl.cluster_options[user_data['key']] = str(user_data['value'].text)
+    cluster = str(user_data['cluster'])
+    key = str(user_data['key'])
+    value = str(user_data['value'].text)
+    if value != '':
+        if key in cl.cluster_options:
+            cl.cluster_options[key] = value
         else:
             logging.info('handle this case')
-        logging.info('user_data: {}'.format(user_data))
-        logging.info('Saved config option successfully. new value: {}'.format(user_data['value'].text))
+        logging.info('Saved config option successfully. new value: {}'.format(value))
         logging.info(cl.cluster_options)
         
-        cfg.write_cluster_conf(user_data['cluster'], cl.cluster_options)
-        saved_callback('ok')
+        try:
+            cfg.cluster_conf(cluster).write(cl.cluster_options)
+            saved_callback('ok')
+        except:
+            error_saving_callback('notok')
     else:
         logging.info('No Change in configuration. Not saving.')
 
@@ -459,32 +467,36 @@ def save_role_config_option(obj, user_data):
             content[key] = value
         else:
             logging.info('handle this case')
-        logging.info('user_data: {}'.format(user_data))
         logging.info('Saved config option successfully. new value: {}'.format(value))
         logging.info(content)
         
-        Role(role).write_conf(content)
-        saved_callback('ok')
+        try:
+            Role(role).write_conf(content)
+            saved_callback('ok')
+        except:
+            error_saving_callback('notok')
     else:
         logging.info('No Change in configuration. Not saving.')
 
 def save_global_config_option(obj, user_data):
-    if user_data['value'].text != '':
-        if user_data['key'] in cl.global_options:
-            cl.global_options[user_data['key']] = str(user_data['value'].text)
+    key = str(user_data['key'])
+    value = str(user_data['value'].text)
+    if value != '':
+        if key in cl.global_options:
+            cl.global_options[key] = value
         else:
             logging.info('handle this case')
-        logging.info('user_data: {}'.format(user_data))
-        logging.info('Saved config option successfully. new value: {}'.format(user_data['value'].text))
+        logging.info('Saved config option successfully. new value: {}'.format(value))
         logging.info(cl.global_options)
-        
-        cfg.write_global_conf(cl.global_options)
-        saved_callback('ok')
+        try:
+            cfg.global_conf.write(cl.global_options)
+            saved_callback('ok')
+        except:
+            error_saving_callback('notok')
     else:
         logging.info('No Change in configuration. Not saving.')
 
-# rename register_role_change
-def register_change(obj, dunno, node_name):
+def register_role_change(obj, dunno, node_name):
     # True seems to be unchecked
     layout = cl.layout
     logging.info("Current layout: {}".format(layout))
@@ -496,7 +508,6 @@ def register_change(obj, dunno, node_name):
         logging.info("Deselected role {}".format(obj.label))
         cl.layout[node_name].remove(obj.label)
 
-# rename register_role_change
 def register_host_change(obj, dunno, node_name):
     # True seems to be unchecked
     layout = cl.layout
@@ -517,6 +528,8 @@ def exit_program(button):
 cl = Cluster()
 clcl = cl
 cfg = Settings()
+conf = cfg.global_conf
+
 
 def load_from_salt():
 
@@ -524,10 +537,36 @@ def load_from_salt():
     cl.clusters = cfg.get_clusters()
     cl.roles = cfg.get_available_roles()
     cl.hosts = cfg.get_hosts()
-    cl.global_options = cfg.get_global_conf()
-    cl.cluster_options = cfg.get_cluster_conf('ceph')
+    cl.global_options = cfg.global_conf.read()
+    cl.cluster_options = cfg.cluster_conf('ceph').read()
 
 load_from_salt()
+
+
+class Helper(object):
+
+    KEYNOTFOUND = '<KEYNOTFOUND>'       # KeyNotFound for dictDiff
+    @staticmethod
+    def dict_diff(first, second):
+        """ Return a dict of keys that differ with another config object.  If a value is
+            not found in one fo the configs, it will be represented by KEYNOTFOUND.
+            @param first:   Fist dictionary to diff.
+            @param second:  Second dicationary to diff.
+            @return diff:   Dict of Key => (first.val, second.val)
+        """
+        diff = {}
+        # Check all keys in first dict
+        for key in first.keys():
+            if (not second.has_key(key)):
+                diff[key] = (first[key], KEYNOTFOUND)
+            elif (first[key] != second[key]):
+                diff[key] = (first[key], second[key])
+        # Check all keys in second dict to find missing
+        for key in second.keys():
+            if (not first.has_key(key)):
+                diff[key] = (KEYNOTFOUND, second[key])
+        return diff
+
 
 menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster', 
                                          [ 
@@ -552,6 +591,8 @@ menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster',
                                         [ sub_menu(u'Dummy', [ 
                                             menu_button(u'{}'.format(config_option), item_edit) for config_option in cl.global_options])
                                          ]),
+                                menu_button(u'Config diff', layout_diff),
+                                menu_button(u'Exit', exit_program),
                                         ]) 
 
 class CascadingBoxes(urwid.WidgetPlaceholder):
@@ -575,11 +616,12 @@ class CascadingBoxes(urwid.WidgetPlaceholder):
         self.box_level += 1
 
     def keypress(self, size, key):
-        if key == 'esc' and self.box_level > 1:
+        if key == 'esc' and self.box_level > 1 or key == 'q' and self.box_level > 1:
             self.original_widget = self.original_widget[0]
             self.box_level -= 1
             cl.pop_from_selection()
             default_footer()
+            default_header()
         else:
             return super(CascadingBoxes, self).keypress(size, key)
 
@@ -590,6 +632,13 @@ def default_footer():
         footer_text.remove(saved_flag)
         footer = urwid.AttrMap(urwid.Text(footer_text), 'foot')
         view.footer = footer
+
+def default_header():
+    error_flag = ('error', " Error saving")
+    if error_flag in header_text:
+        header_text.remove(error_flag)
+        header = urwid.AttrMap(urwid.Text(header_text), 'header')
+        view.header = header
 
 # Classify that to access view.footer/header instead of accessing this globally
 #import pdb;pdb.set_trace()
@@ -605,16 +654,16 @@ palette = [
     ('editfc','white', 'dark blue', 'bold'),
     ('editbx','light gray', 'dark blue'),
     ('editcp','black','light gray', 'standout'),
+    ('error','light red','black', 'bold'),
     ]
 
 footer_text = [
-    ('title', "SES Configurator"), "    ",
-    ('key', "UP, j"), ", ", ('key', "DOWN, k"), ", ",
-    ('key', "PAGE UP"), " and ", ('key', "PAGE DOWN"),
-    " move view  ",
-    ('key', "Q"), " exits or moves one layer down",
+    ('title', "SES Configurator"), "  ",
+    ('key', "UP, j"), ", ", ('key', "DOWN, k"), 
+    "  move view  ",
+    ('key', "Q or ESC"), " moves one layer down",
     ]
-header_text = ('title', "SES Configurator")
+header_text = [('title', "SES Configurator")]
 
 footer = urwid.AttrMap(urwid.Text(footer_text), 'foot')
 header = urwid.AttrMap(urwid.Text(header_text), 'header')

@@ -5,8 +5,36 @@ import salt.client
 import yaml
 import os
 
+
+# move that to config
 LOG_LEVEL="INFO"
 LOG_FILE_PATH="/root/policy.log"
+
+class Helper(object):
+
+    KEYNOTFOUND = '<KEYNOTFOUND>'       # KeyNotFound for dictDiff
+    @staticmethod
+    def dict_diff(first, second):
+        """ Return a dict of keys that differ with another config object.  If a value is
+            not found in one fo the configs, it will be represented by KEYNOTFOUND.
+            @param first:   Fist dictionary to diff.
+            @param second:  Second dicationary to diff.
+            @return diff:   Dict of Key => (first.val, second.val)
+        """
+        diff = {}
+        # Check all keys in first dict
+        for key in first.keys():
+            if (not second.has_key(key)):
+                diff[key] = (first[key], KEYNOTFOUND)
+            elif (first[key] != second[key]):
+                diff[key] = (first[key], second[key])
+        # Check all keys in second dict to find missing
+        for key in second.keys():
+            if (not first.has_key(key)):
+                diff[key] = (KEYNOTFOUND, second[key])
+        return diff
+
+
 
 def _setup_logging():
     """
@@ -254,6 +282,25 @@ class Cluster(object):
         diff = Helper.dict_diff(curr, new)
         return diff 
 
+    def readable_diff(self):
+        diff = self.layout_diff()
+        text_body = []
+        for host, diff in diff.iteritems():
+            old = diff[0]
+            new = diff[1]
+            if len(old) < len(new):
+                verb = 'gained'
+                role = set(new) - set(old)
+            else:
+                verb = 'lost'
+                role = set(old) - set(new)
+            role = list(role)
+            text_body.append("{host} {verb} role {role}\n".format(host=host, verb=verb, role=" ".join(role)))
+        if text_body:
+            return text_body 
+        else:
+            return ["No Change in config detected"]
+
     def reverse_view(self):
         # show roles that list nodes
         nodes = []
@@ -363,8 +410,8 @@ def item_edit_role(button):
 
 def layout_diff(button):
     config_option = button.label
-    diff = cl.layout_diff()
-    text = urwid.Text(str(diff))
+    diff = cl.readable_diff()
+    text = urwid.Text(diff)
     div = urwid.Divider()
     save = urwid.Button(u'Save')
     #urwid.connect_signal(save, 'click', save_role_change, user_data)
@@ -542,31 +589,7 @@ def load_from_salt():
 
 load_from_salt()
 
-
-class Helper(object):
-
-    KEYNOTFOUND = '<KEYNOTFOUND>'       # KeyNotFound for dictDiff
-    @staticmethod
-    def dict_diff(first, second):
-        """ Return a dict of keys that differ with another config object.  If a value is
-            not found in one fo the configs, it will be represented by KEYNOTFOUND.
-            @param first:   Fist dictionary to diff.
-            @param second:  Second dicationary to diff.
-            @return diff:   Dict of Key => (first.val, second.val)
-        """
-        diff = {}
-        # Check all keys in first dict
-        for key in first.keys():
-            if (not second.has_key(key)):
-                diff[key] = (first[key], KEYNOTFOUND)
-            elif (first[key] != second[key]):
-                diff[key] = (first[key], second[key])
-        # Check all keys in second dict to find missing
-        for key in second.keys():
-            if (not first.has_key(key)):
-                diff[key] = (KEYNOTFOUND, second[key])
-        return diff
-
+clcl.readable_diff()
 
 menu_top = menu(u'Main Menu', [ sub_menu(u'Cluster', 
                                          [ 

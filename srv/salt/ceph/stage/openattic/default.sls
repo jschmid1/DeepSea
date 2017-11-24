@@ -30,10 +30,11 @@ openattic oaconfig:
         - sls: ceph.openattic.oaconfig
 
 
-restart openattic:
-  salt.state:
-    - tgt: "I@roles:openattic and I@cluster:ceph"
-    - tgt_type: compound
-    - sls: ceph.openattic.restart
+# disabled due to https://github.com/SUSE/DeepSea/issues/816
+#restart openattic:
+#  salt.state:
+#    - tgt: "I@roles:openattic and I@cluster:ceph"
+#    - tgt_type: compound
+#    - sls: ceph.openattic.restart
 
 {% endif %}

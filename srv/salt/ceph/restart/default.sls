@@ -6,4 +6,5 @@ include:
   - .mds
   - .igw
   - .ganesha
-  - .openattic
+# disabled due to https://github.com/SUSE/DeepSea/issues/816
+#  - .openattic 

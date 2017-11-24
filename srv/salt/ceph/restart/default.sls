@@ -6,3 +6,4 @@ include:
   - .mds
   - .igw
   - .ganesha
+  - .openattic

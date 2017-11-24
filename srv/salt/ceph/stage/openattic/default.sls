@@ -29,4 +29,11 @@ openattic oaconfig:
         - tgt_type: compound
         - sls: ceph.openattic.oaconfig
 
+
+restart openattic:
+  salt.state:
+    - tgt: "I@roles:openattic and I@cluster:ceph"
+    - tgt_type: compound
+    - sls: ceph.openattic.restart
+
 {% endif %}

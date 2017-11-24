@@ -261,6 +261,7 @@ systemctl try-restart salt-api > /dev/null 2>&1 || :
 %dir /srv/salt/ceph/restart/igw
 %dir /srv/salt/ceph/restart/mds
 %dir /srv/salt/ceph/restart/ganesha
+%dir /srv/salt/ceph/restart/openattic
 %dir /srv/salt/ceph/rgw
 %dir %attr(0700, salt, salt) /srv/salt/ceph/rgw/cache
 %dir /srv/salt/ceph/rgw/files

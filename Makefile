@@ -580,7 +580,7 @@ install: copy-files
 	zypper -n install python-setuptools python-click
 	python setup.py install --root=$(DESTDIR)/
 
-rpm: tarball test
+rpm: tarball
 	rpmbuild -bb deepsea.spec
 
 # Removing test dependency until resolved

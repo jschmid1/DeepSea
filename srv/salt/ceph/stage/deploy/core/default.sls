@@ -36,12 +36,6 @@ time:
     - sls: ceph.time
 {% endif %}
 
-packages:
-  salt.state:
-    - tgt: 'I@cluster:ceph'
-    - tgt_type: compound
-    - sls: ceph.packages
-
 configuration check:
   salt.state:
     - tgt: {{ salt['pillar.get']('master_minion') }}

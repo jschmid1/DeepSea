@@ -17,7 +17,7 @@ import re
 import pprint
 import yaml
 # pylint: disable=import-error,3rd-party-module-not-gated,redefined-builtin
-from helper import _run
+
 
 log = logging.getLogger(__name__)
 
@@ -352,7 +352,7 @@ class OSDWeight(object):
         cmd = ("ceph --keyring={} --name={} osd crush reweight osd.{} "
                "{}".format(self.settings['keyring'], self.settings['client'],
                            self.osd_id, weight))
-        return _run(cmd)
+        return __salt__['helper.run'](cmd)
 
     def osd_df(self):
         """
@@ -469,7 +469,7 @@ def readlink(device, follow=True):
     if follow:
         option = '-f'
     cmd = "readlink {} {}".format(option, device)
-    _, stdout, _ = _run(cmd)
+    _, stdout, _ = __salt__['helper.run'](cmd)
     return stdout
 
 
@@ -760,7 +760,7 @@ class OSDPartitions(object):
         pathnames = _find_paths(self.osd.device)
         if pathnames:
             cmd = "sgdisk -Z --clear -g {}".format(self.osd.device)
-            _rc, _stdout, _stderr = _run(cmd)
+            _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
             if _rc != 0:
                 raise RuntimeError("{} failed".format(cmd))
 
@@ -930,7 +930,7 @@ class OSDPartitions(object):
                 cmd = ("/usr/sbin/sgdisk -N {} -t {}:{} "
                        "{}".format(number, number,
                                    self.osd.types[partition_type], device))
-            _rc, _stdout, _stderr = _run(cmd)
+            _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
             if _rc != 0:
                 raise RuntimeError("{} failed".format(cmd))
             log.info("partprobe disk")
@@ -940,7 +940,7 @@ class OSDPartitions(object):
             if os.path.exists("{}{}".format(device, number)):
                 wipe_cmd = ("dd if=/dev/zero of={}{} bs=4096 count=1 "
                             "oflag=direct".format(device, number))
-                _run(wipe_cmd)
+                __salt__['helper.run'](wipe_cmd)
             index += 1
 
     def _part_probe(self, device):
@@ -951,7 +951,7 @@ class OSDPartitions(object):
         retries = 5
         cmd = "/usr/sbin/partprobe {}".format(device)
         for _ in range(1, retries + 1):
-            _rc, _stdout, _stderr = _run(cmd)
+            _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
             if _rc == 0:
                 return
             time.sleep(wait_time)
@@ -1021,7 +1021,7 @@ class OSDCommands(object):
         Check partition type
         """
         cmd = "/usr/sbin/sgdisk -i {} {}".format(_partition, device)
-        _, result, _ = _run(cmd)
+        _, result, _ = __salt__['helper.run'](cmd)
         _id = "Partition GUID code: {}".format(self.osd.types[partition_type])
         return _id in result
 
@@ -1321,7 +1321,7 @@ class OSDCommands(object):
             return True
         if size:
             cmd = "blockdev --getsize64 {}".format(devicename)
-            _, _stdout, _stderr = _run(cmd)
+            _, _stdout, _stderr = __salt__['helper.run'](cmd)
             bsize = int(_stdout)
             _bytes = self._convert(size)
             if _bytes != bsize:
@@ -1445,15 +1445,15 @@ class OSDRemove(object):
         """
         # Check weight is zero
         cmd = "systemctl disable ceph-osd@{}".format(self.osd_id)
-        _run(cmd)
+        __salt__['helper.run'](cmd)
         # How long with this hang on a broken OSD
         cmd = "systemctl stop ceph-osd@{}".format(self.osd_id)
-        _run(cmd)
+        __salt__['helper.run'](cmd)
         cmd = r"pkill -f ceph-osd.*{}\ --".format(self.osd_id)
-        _run(cmd)
+        __salt__['helper.run'](cmd)
         time.sleep(1)
         cmd = r"pkill -9 -f ceph-osd.*{}\ --".format(self.osd_id)
-        _run(cmd)
+        __salt__['helper.run'](cmd)
         time.sleep(1)
         return ""
 
@@ -1471,7 +1471,7 @@ class OSDRemove(object):
                     mount = entry[0]
                 if mount in mounted:
                     cmd = "umount {}".format(mount)
-                    _rc, _stdout, _stderr = _run(cmd)
+                    _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
                     log.debug("returncode: {}".format(_rc))
                     if _rc != 0:
                         msg = "Unmount failed - check for processes on {}".format(entry[0])
@@ -1481,7 +1481,7 @@ class OSDRemove(object):
 
         if '/dev/dm' in self.partitions['osd']:
             cmd = "dmsetup remove {}".format(self.partitions['osd'])
-            _run(cmd)
+            __salt__['helper.run'](cmd)
         return ""
 
     def _mounted(self):
@@ -1503,7 +1503,7 @@ class OSDRemove(object):
             for _, _partition in six.iteritems(self.partitions):
                 if os.path.exists(_partition):
                     cmd = "dd if=/dev/zero of={} bs=4096 count=1 oflag=direct".format(_partition)
-                    _run(cmd)
+                    __salt__['helper.run'](cmd)
         else:
             msg = "Nothing to wipe - no partitions available"
             log.error(msg)
@@ -1541,7 +1541,7 @@ class OSDRemove(object):
             log.debug("Checking attr {}".format(attr))
             if '/dev/dm' in self.partitions[attr]:
                 cmd = "dmsetup remove {}".format(self.partitions[attr])
-                _run(cmd)
+                __salt__['helper.run'](cmd)
                 continue
 
             short_name = readlink(self.partitions[attr])
@@ -1560,7 +1560,7 @@ class OSDRemove(object):
                     if disk:
                         log.debug("disk: {} partition: {}".format(disk, _partition))
                         cmd = "sgdisk -d {} {}".format(_partition, disk)
-                        _run(cmd)
+                        __salt__['helper.run'](cmd)
             else:
                 log.error("Partition {} does not exist".format(short_name))
 
@@ -1570,12 +1570,12 @@ class OSDRemove(object):
         """
         if self.osd_disk and os.path.exists(self.osd_disk):
             cmd = "blockdev --getsz {}".format(self.osd_disk)
-            _, _stdout, _stderr = _run(cmd)
+            _, _stdout, _stderr = __salt__['helper.run'](cmd)
             end_of_disk = int(_stdout)
             seek_position = int(end_of_disk/4096 - 33)
             cmd = ("dd if=/dev/zero of={} bs=4096 count=33 seek={} "
                    "oflag=direct".format(self.osd_disk, seek_position))
-            _run(cmd)
+            __salt__['helper.run'](cmd)
             return ""
 
     def _delete_osd(self):
@@ -1584,7 +1584,7 @@ class OSDRemove(object):
         """
         if self.osd_disk and os.path.exists(self.osd_disk):
             cmd = "sgdisk -Z --clear -g {}".format(self.osd_disk)
-            _rc, _stdout, _stderr = _run(cmd)
+            _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
             if _rc != 0:
                 raise RuntimeError("{} failed".format(cmd))
 
@@ -1596,7 +1596,7 @@ class OSDRemove(object):
         for cmd in ['udevadm settle --timeout=20',
                     'partprobe',
                     'udevadm settle --timeout=20']:
-            _run(cmd)
+            __salt__['helper.run'](cmd)
 
 
 def remove(osd_id, **kwargs):
@@ -1729,7 +1729,7 @@ class OSDDevices(object):
             if os.path.exists(pathname):
                 cmd = (r"find -L {} -samefile {} \( -name ata* -o -name scsi* "
                        r"-o -name nvme* \)".format(pathname, device))
-                _, _stdout, _stderr = _run(cmd)
+                _, _stdout, _stderr = __salt__['helper.run'](cmd)
                 if _stdout:
                     return _stdout.split()[-1]
                 return readlink(device)
@@ -1843,8 +1843,8 @@ def deploy():
             osdp.clean()
             osdp.partition()
             osdc = OSDCommands(config)
-            _run(osdc.prepare())
-            _run(osdc.activate())
+            __salt__['helper.run'](osdc.prepare())
+            __salt__['helper.run'](osdc.activate())
 
 
 def redeploy(simultaneous=False):
@@ -1878,8 +1878,8 @@ def redeploy(simultaneous=False):
             osdp = OSDPartitions(config)
             osdp.partition()
             osdc = OSDCommands(config)
-            _run(osdc.prepare())
-            _run(osdc.activate())
+            __salt__['helper.run'](osdc.prepare())
+            __salt__['helper.run'](osdc.activate())
             # not is_prepared(disk)):
 
 
@@ -1926,7 +1926,7 @@ def _fsck(device, _partition):
         prefix = 'p'
     # cmd = "/sbin/fsck -t xfs -n {}{}{}".format(device, prefix, partition)
     cmd = "/usr/sbin/xfs_admin -u {}{}{}".format(device, prefix, _partition)
-    _rc, _stdout, _stderr = _run(cmd)
+    _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
     return _rc == 0
 
 

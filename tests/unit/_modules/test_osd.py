@@ -7,6 +7,18 @@ from srv.salt._modules import osd
 from srv.salt._modules import helper
 from mock import MagicMock, patch, mock, create_autospec
 
+@pytest.fixture(scope='class')
+def helper_specs(module=None, ret_val=(0, 'stdout', 'stderr')):
+    def specs(module=module, ret_val=ret_val):
+        def pass_through(*args):
+            return args[0]                
+        convert_out_mock = create_autospec(lambda x: x, side_effect=pass_through)
+        run_mock = create_autospec(lambda x: x, return_value=ret_val)
+        module.__salt__ = {'helper.run': run_mock,
+                           'helper.convert_out': convert_out_mock}
+        return module 
+    return specs
+
 class TestOSDInstanceMethods():
     '''
     This class contains a set of functions that test srv.salt._modules.osd
@@ -128,7 +140,6 @@ class TetstOSDState():
 class TestOSDWeight():
     pass
 
-
 class TestOSDConfig():
 
 
@@ -144,11 +155,9 @@ class TestOSDConfig():
             # everything after the yield is a teardown code
             print("Teardown OSDConfig object")
 
-    @pytest.fixture(scope='class')
-    def osd_glob(self):
-        mock_func = create_autospec(lambda x: x, return_value=(0, 'stdout', 'stderr'))
-        osd.__salt__ = {'helper.run': mock_func}
-        yield osd
+    """
+    Prototype for dynamic __salt__ population
+    """
 
     @pytest.mark.skip(reason='skip')
     def test__set_tli(self):
@@ -551,12 +560,6 @@ class TestOSDPartitions():
         # custom OSDConfig feeding.
         cnf = osd.OSDPartitions
         yield cnf
-
-    @pytest.fixture(scope='class')
-    def osd_glob(self):
-        mock_func = create_autospec(lambda x: x, return_value=(0, 'stdout', 'stderr'))
-        osd.__salt__ = {'helper.run': mock_func}
-        yield osd
 
     @mock.patch('srv.salt._modules.osd.OSDPartitions._xfs_partitions')
     def test_partition_filestore(self, xfs_part_mock, osdp_o):
@@ -1136,12 +1139,6 @@ class TestOSDCommands():
         cnf = osd.OSDCommands
         yield cnf
 
-    @pytest.fixture(scope='class')
-    def osd_glob(self):
-        mock_func = create_autospec(lambda x: x, return_value=(0, 'stdout', 'stderr'))
-        osd.__salt__ = {'helper.run': mock_func}
-        yield osd
-
     def test_osd_partition_1(self, osdc_o):
         """
         Given it's filestore osd+journal, not colocated
@@ -1195,8 +1192,8 @@ class TestOSDCommands():
         ret = obj.osd_partition()
         hp_mock.assert_called_with('/dev/sdx', 'osd')
 
-
-    def test_is_partition(self, osdc_o, osd_glob):
+    def test_is_partition(self, osdc_o, helper_specs):
+        helper_specs(osd)
         osd_config = OSDConfig()
         obj = osdc_o(osd_config)
         ret = obj.is_partition('osd', osd_config.device, 1)
@@ -2028,28 +2025,19 @@ class Test_is_incorrect():
     def osdc_o(self):
         # Only return the non-instantiated class to allow
         # custom OSDConfig feeding.
-        cnf = osd.OSDCommands
-        yield cnf
-
-    @pytest.fixture(scope='class')
-    def osd_glob(self, return_value=(0, 'stdout', 'stderr')):
-        def specs(return_value):
-            mock_func = create_autospec(lambda x: x, return_value=return_value)
-            osd.__salt__ = {'helper.run': mock_func}
-            return osd
-        yield specs
+        yield osd
 
     @patch('os.path.exists', new=f_os.path.exists)
-    def test_is_incorrect_bluestore(self, osdc_o, osd_glob):
+    def test_is_incorrect_bluestore(self, osdc_o):
         """
         Check independent bluestore OSD
         """
-        osd_specced = osd_glob(return_value=(0, 'test', 'stderrtest'))
 
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2058,20 +2046,19 @@ class Test_is_incorrect():
         assert ret == False
 
     @patch('os.path.exists', new=f_os.path.exists)
-    def test_is_incorrect_bluestore_mismatch_format(self, osdc_o, osd_glob):
+    def test_is_incorrect_bluestore_mismatch_format(self, osdc_o):
         """
         Check independent bluestore OSD with filestore format
         """
-        osd_specced = osd_glob(return_value=(1, 'test', 'stderrtest'))
         kwargs = { 'device': '/dev/sdb',
                    'format': 'filestore' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
             '''/dev/sdb /var/lib/ceph/osd/ceph-1 rest\n''')
-        import pdb;pdb.set_trace()
         ret = obj.is_incorrect()
         assert ret == True
 
@@ -2084,6 +2071,7 @@ class Test_is_incorrect():
                    'format': 'bluestore' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2100,6 +2088,7 @@ class Test_is_incorrect():
                    'format': 'bluestore' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2109,18 +2098,19 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_wal(self, readlink, osdc_o, osd_glob):
+    def test_is_incorrect_bluestore_wal(self, readlink, osdc_o):
         """
         Check bluestore OSD with a wal
         """
         readlink.return_value = "/dev/sdc"
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'wal': '/dev/sdc',
                    'wal_size': '100M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2130,18 +2120,19 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_wal_no_device(self, readlink, run, osdc_o):
+    def test_is_incorrect_bluestore_wal_no_device(self, readlink, osdc_o):
         """
         Check bluestore OSD with a configured wal, but no separate wal device
         """
         readlink.return_value = ""
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'wal': '/dev/sdc',
                    'wal_size': '100M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2151,18 +2142,19 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_wal_wrong_device(self, readlink, run, osdc_o):
+    def test_is_incorrect_bluestore_wal_wrong_device(self, readlink, osdc_o):
         """
         Check bluestore OSD with a wal, but wal is a different device
         """
         readlink.return_value = "/dev/sdx"
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'wal': '/dev/sdc',
                    'wal_size': '100M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2172,18 +2164,19 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_wal_wrong_size(self, readlink, run, osdc_o):
+    def test_is_incorrect_bluestore_wal_wrong_size(self, readlink, osdc_o):
         """
         Check bluestore OSD with a wal, but wal is the wrong size
         """
         readlink.return_value = "/dev/sdc"
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'wal': '/dev/sdc',
                    'wal_size': '200M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2193,18 +2186,19 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_db(self, readlink, run, osdc_o):
+    def test_is_incorrect_bluestore_db(self, readlink, osdc_o):
         """
         Check bluestore OSD with a db
         """
         readlink.return_value = "/dev/sdc"
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'db': '/dev/sdc',
                    'db_size': '100M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2214,18 +2208,19 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_db_no_device(self, readlink, run, osdc_o):
+    def test_is_incorrect_bluestore_db_no_device(self, readlink, osdc_o):
         """
         Check bluestore OSD with a configured db, but no db device
         """
         readlink.return_value = ""
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'db': '/dev/sdc',
                    'db_size': '100M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2235,18 +2230,19 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_db_wrong_device(self, readlink, run, osdc_o):
+    def test_is_incorrect_bluestore_db_wrong_device(self, readlink, osdc_o):
         """
         Check bluestore OSD with a db, but with a different db device
         """
         readlink.return_value = "/dev/sdx"
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'db': '/dev/sdc',
                    'db_size': '100M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2256,18 +2252,19 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_db_wrong_size(self, readlink, run, osdc_o):
+    def test_is_incorrect_bluestore_db_wrong_size(self, readlink, osdc_o):
         """
         Check bluestore OSD with a db, but with wrong size
         """
         readlink.return_value = "/dev/sdc"
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'db': '/dev/sdc',
                    'db_size': '200M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2277,12 +2274,12 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_bluestore_wal_db(self, readlink, run, osdc_o):
+    def test_is_incorrect_bluestore_wal_db(self, readlink, osdc_o):
         """
         Check bluestore OSD with a wal and db
         """
         readlink.return_value = "/dev/sdc"
-        run.return_value = ( 0, '104857600', '')
+        #run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'format': 'bluestore',
                    'db': '/dev/sdc',
@@ -2291,6 +2288,7 @@ class Test_is_incorrect():
                    'wal_size': '100M' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2306,6 +2304,7 @@ class Test_is_incorrect():
         kwargs = { 'device': '/dev/sdb'}
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2315,7 +2314,7 @@ class Test_is_incorrect():
 
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('__builtin__.open', new=f_open)
-    def test_is_incorrect_filestore_mismatch_format(self, osdc_o, osd_glob):
+    def test_is_incorrect_filestore_mismatch_format(self, osdc_o):
         """
         Check independent filestore OSD with bluestore format
         """
@@ -2323,6 +2322,7 @@ class Test_is_incorrect():
                    'format': 'bluestore' }
 
         osd_config = OSDConfig(**kwargs)
+        osdc_o = osd.OSDCommands
         obj = osdc_o(osd_config)
 
         Test_is_incorrect.proc_mount.SetContents(
@@ -2333,12 +2333,13 @@ class Test_is_incorrect():
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('__builtin__.open', new=f_open)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_filestore_journal(self, readlink, run, osdc_o):
+    def test_is_incorrect_filestore_journal(self, readlink, osdc_o, helper_specs):
         """
         Check filestore OSD with a journal
         """
         readlink.return_value = "/dev/sdc"
-        run.return_value = ( 0, '104857600', '')
+        osd = helper_specs(osdc_o, ret_val=(0,'104857600', ''))
+        osdc_o = osd.OSDCommands
         kwargs = { 'device': '/dev/sdb',
                    'journal': '/dev/sdc',
                    'journal_size': '100M' }
@@ -2354,12 +2355,13 @@ class Test_is_incorrect():
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('__builtin__.open', new=f_open)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_filestore_journal_no_device(self, readlink, run, osdc_o):
+    def test_is_incorrect_filestore_journal_no_device(self, readlink, osdc_o, helper_specs):
         """
         Check filestore OSD with a journal
         """
         readlink.return_value = ""
-        run.return_value = ( 0, '104857600', '')
+        osd = helper_specs(osdc_o, ret_val=(0,'104857600', ''))
+        osdc_o = osd.OSDCommands
         kwargs = { 'device': '/dev/sdb',
                    'journal': '/dev/sdc',
                    'journal_size': '100M' }
@@ -2375,12 +2377,13 @@ class Test_is_incorrect():
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('__builtin__.open', new=f_open)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_filestore_journal_wrong_device(self, readlink, run, osdc_o):
+    def test_is_incorrect_filestore_journal_wrong_device(self, readlink, osdc_o, helper_specs):
         """
         Check filestore OSD with a journal
         """
         readlink.return_value = "/dev/sdx"
-        run.return_value = ( 0, '104857600', '')
+        osd = helper_specs(osdc_o, ret_val=(0,'104857600', ''))
+        osdc_o = osd.OSDCommands
         kwargs = { 'device': '/dev/sdb',
                    'journal': '/dev/sdc',
                    'journal_size': '100M' }
@@ -2396,12 +2399,13 @@ class Test_is_incorrect():
     @patch('os.path.exists', new=f_os.path.exists)
     @patch('__builtin__.open', new=f_open)
     @patch('srv.salt._modules.osd.readlink')
-    def test_is_incorrect_filestore_journal_wrong_size(self, readlink, run, osdc_o):
+    def test_is_incorrect_filestore_journal_wrong_size(self, readlink, osdc_o, helper_specs):
         """
         Check filestore OSD with a journal, but with wrong size
         """
+        helper_specs(osdc_o, ret_val=(0,'104857600', ''))
+        osdc_o = osd.OSDCommands
         readlink.return_value = "/dev/sdc"
-        run.return_value = ( 0, '104857600', '')
         kwargs = { 'device': '/dev/sdb',
                    'journal': '/dev/sdc',
                    'journal_size': '200M' }

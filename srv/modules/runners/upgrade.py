@@ -8,6 +8,12 @@ from __future__ import print_function
 # pylint: disable=import-error,3rd-party-module-not-gated,redefined-builtin
 import salt.client
 import salt.utils.error
+from glob import glob
+import logging
+from printer import PrettyPrinter
+from exceptions import InvalidConfigKV
+
+log = logging.getLogger(__name__)
 
 
 class UpgradeValidation(object):
@@ -28,6 +34,7 @@ class UpgradeValidation(object):
         """
         self.local = salt.client.LocalClient()
         self.cluster = cluster
+        self.printer = PrettyPrinter()
 
     def colocated_services(self):
         """
@@ -67,6 +74,45 @@ class UpgradeValidation(object):
                     return False, msg
         return True, ""
 
+    def check_deprecated_conf_val(self):
+        """
+        Checks for deprecated/renamed config values
+        #TODO: find a curated list of those
+        """
+        depr_conf = {'dummy': 'value',
+                     'foo': 'bar',
+                     'lala': 'bar',
+                     'lala': 'mlala'}
+        conf_path = '/srv/salt/ceph/configuration/files/ceph.conf.d'
+        suffix = '*.conf'
+        files = glob("{path}/{suffix}".format(path=conf_path, suffix=suffix))
+        matches = {}
+        for fn in files:
+            with open(fn, 'r') as _fd:
+                matches[fn] = {}
+                for line in _fd:
+                    if not len(line.split('=')) == 2:
+                        raise InvalidConfigKV
+                    k, v = line.split('=')
+                    k = k.strip()
+                    if k in depr_conf:
+                        logging.info('found {} in list of deprecated configs'.format(k))
+                        v = v.strip()
+                        if depr_conf[k] == v:
+                            logging.info('found key: {} for value: {} in list of deprecated configs'.format(k, v))
+                            matches[fn][k] = v
+            if not matches[fn]:
+                logging.info('{fn} did not contain any depricated or dangerous configs'.format(fn=fn))
+                matches.pop(fn, None)
+
+        
+        return (False, matches) if matches else (True, 'success')
+
+
+def check_deprecated_conf_val():
+    uvo = UpgradeValidation()
+    return uvo.check_deprecated_conf_val()
+    
 
 def help_():
     """
@@ -84,11 +130,11 @@ def check():
     Run upgrade checks
     """
     uvo = UpgradeValidation()
-    checks = [uvo.is_master_standalone]  # , uvo.colocated_services]
+    checks = [uvo.is_master_standalone, check_deprecated_conf_val]  # , uvo.colocated_services]
     for chk in checks:
         ret, msg = chk()
         if not ret:
-            print(msg)
+            uvo.printer.add('check_drep', {}, msg, {})
             return ret
     return ret
 

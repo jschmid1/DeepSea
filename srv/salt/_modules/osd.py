@@ -1836,6 +1836,7 @@ def deploy():
     The last idea is converting all of this into a state module that returns
     all the commands in the comment.
     """
+    ret_codes = {}
     for device in configured():
         if not is_prepared(device):
             config = OSDConfig(device)
@@ -1843,8 +1844,16 @@ def deploy():
             osdp.clean()
             osdp.partition()
             osdc = OSDCommands(config)
-            _run(osdc.prepare())
-            _run(osdc.activate())
+            ret_codes['prepare'] = _run(osdc.prepare())
+            ret_codes['activate'] = _run(osdc.activate())
+        for k, v in ret_codes.items():
+            if ret_codes[k][0] != 0:
+                msg = ('Problem in {} function. return_code: {}'.format(ret_codes[k],
+                                                                        ret_codes[k][0]))
+                log.error(msg)
+                log.error("STDOUT: {}".format(ret_code[k][1]))
+                log.error("STDERR: {}".format(ret_code[k][2]))
+                raise Exception(msg)
 
 
 def redeploy(simultaneous=False):

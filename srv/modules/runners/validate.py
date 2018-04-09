@@ -859,29 +859,32 @@ class Validate(object):
                      'lala': 'mlala'}
         conf_path = '/srv/salt/ceph/configuration/files/ceph.conf.d'
         suffix = '*.conf'
-        files = glob("{path}/{suffix}".format(path=conf_path, suffix=suffix))
+        files = glob.glob("{path}/{suffix}".format(path=conf_path, suffix=suffix))
         for fn in files:
             with open(fn, 'r') as _fd:
                 for line in _fd:
                     #TODO: improve on that
                     if not len(line.split('=')) == 2:
                         raise InvalidConfigKV
-                    key, value = line.split('=')
+                    key, val = line.split('=')
                     key = key.strip()
                     if key in depr_conf:
                         alert_name = 'config_deprecation_warning: {}'.format(fn)
-                        msg = 'found {} in list of deprecated configs'.format(key)
+                        msg = 'found key: {}. This is deprecated and needs to be adjusted'.format(key)
                         logging.warning(msg)
                         self.warnings.setdefault(alert_name, []).append(msg)
                         self._set_pass_status(alert_name)
                         val = val.strip()
                         if depr_conf[key] == val:
-                            msg = 'found key: {} for value: {} in list of deprecated configs'.format(key, val)
+                            msg = 'found key: {} with value: {}. This is deprecated and needs to be adjusted'.format(key, val)
                             logging.error(msg)
+                            self.warnings.pop(alert_name)
                             alert_name = 'config_deprecation_warning: {}'.format(fn)
                             self.errors.setdefault(alert_name, []).append(msg)
                             self._set_pass_status(alert_name)
-
+    
+    def is_master_standalone(self):
+        pass
 
     def report(self):
         """
@@ -931,21 +934,13 @@ def upgrade(**kwargs):
     """
     TODO: upgrade docstring
     """
-    if not cluster:
-        usage(func='upgrade')
-        exit(1)
-
     local = salt.client.LocalClient()
 
     # Restrict search to this cluster
-    target = deepsea_minions.DeepseaMinions()
+    cluster = 'ceph'
+    # TODO ^^
+    target = DeepseaMinions()
     search = target.deepsea_minions
-    if 'cluster' in __pillar__:
-        if __pillar__['cluster']:
-            # pylint: disable=redefined-variable-type
-            # Salt accepts either list or string as target
-            search = "I@cluster:{}".format(cluster)
-
     pillar_data = local.cmd(search, 'pillar.items', [], tgt_type="compound")
 
     printer = get_printer(**kwargs)

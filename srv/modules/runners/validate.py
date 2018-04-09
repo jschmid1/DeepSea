@@ -846,6 +846,41 @@ class Validate(object):
                    "See `/srv/pillar/ceph/deepsea_minions.sls` for details")
             self.errors['deepsea_minions'] = [msg]
 
+    def config_k_v(self):
+        """
+        Checks for deprecated/renamed config values
+        #TODO: find a curated list of those
+        """
+        depr_conf = {'dummy': 'value',
+                     'foo': 'bar',
+                     'lala': 'bar',
+                     'lala': 'mlala'}
+        conf_path = '/srv/salt/ceph/configuration/files/ceph.conf.d'
+        suffix = '*.conf'
+        files = glob("{path}/{suffix}".format(path=conf_path, suffix=suffix))
+        for fn in files:
+            with open(fn, 'r') as _fd:
+                for line in _fd:
+                    #TODO: improve on that
+                    if not len(line.split('=')) == 2:
+                        raise InvalidConfigKV
+                    key, value = line.split('=')
+                    key = key.strip()
+                    if key in depr_conf:
+                        alert_name = 'config_deprecation_warning: {}'.format(fn)
+                        msg = 'found {} in list of deprecated configs'.format(key)
+                        logging.warning(msg)
+                        self.warnings.setdefault(alert_name, []).append(msg)
+                        self._set_pass_status(alert_name)
+                        val = val.strip()
+                        if depr_conf[key] == val:
+                            msg = 'found key: {} for value: {} in list of deprecated configs'.format(key, val)
+                            logging.error(msg)
+                            alert_name = 'config_deprecation_warning: {}'.format(fn)
+                            self.errors.setdefault(alert_name, []).append(msg)
+                            self._set_pass_status(alert_name)
+
+
     def report(self):
         """
         Print the validation report
@@ -888,6 +923,39 @@ def usage(func='None'):
     """
     print("salt-run validate.{} cluster_name".format(func))
     print("salt-run validate.{} cluster=cluster_name".format(func))
+
+
+def upgrade(**kwargs):
+    """
+    TODO: upgrade docstring
+    """
+    if not cluster:
+        usage(func='upgrade')
+        exit(1)
+
+    local = salt.client.LocalClient()
+
+    # Restrict search to this cluster
+    target = deepsea_minions.DeepseaMinions()
+    search = target.deepsea_minions
+    if 'cluster' in __pillar__:
+        if __pillar__['cluster']:
+            # pylint: disable=redefined-variable-type
+            # Salt accepts either list or string as target
+            search = "I@cluster:{}".format(cluster)
+
+    pillar_data = local.cmd(search, 'pillar.items', [], tgt_type="compound")
+
+    printer = get_printer(**kwargs)
+    valid = Validate(cluster, data=pillar_data, printer=printer)
+
+    valid.config_k_v()
+    valid.is_master_standalone()
+    valid.report()
+
+    if valid.errors:
+        return False
+    return True
 
 
 def pillars(**kwargs):

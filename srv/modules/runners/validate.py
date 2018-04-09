@@ -31,7 +31,7 @@ import salt.client
 import salt.utils.error
 from printer import PrettyPrinter, JsonPrinter
 # pylint: disable=relative-import
-from . import deepsea_minions
+from deepsea_minions import DeepseaMinions
 
 
 log = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class ClusterAssignment(object):
         """
         Query the cluster assignment and remove unassigned
         """
-        target = deepsea_minions.DeepseaMinions()
+        target = DeepseaMinions()
         search = target.deepsea_minions
         self.minions = local.cmd(search, 'pillar.get', ['cluster'])
 
@@ -507,8 +507,10 @@ class Validate(object):
         stderr = []
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE)
         for line in proc.stdout:
+            line = line.decode('ascii')
             stdout.append(line.rstrip('\n'))
         for line in proc.stderr:
+            line = line.decode('ascii')
             stderr.append(line.rstrip('\n'))
         proc.wait()
         return (stdout, stderr)
@@ -668,7 +670,7 @@ class Validate(object):
         """
         Scan all minions for ceph versions in their repos.
         """
-        target = deepsea_minions.DeepseaMinions()
+        target = DeepseaMinions()
         search = target.deepsea_minions
         local = salt.client.LocalClient()
         contents = local.cmd(search, 'pkg.latest_version', ['ceph-common'], tgt_type="compound")
@@ -679,7 +681,7 @@ class Validate(object):
                       .format(minion, version))
             if not version:
                 info = local.cmd(minion, 'pkg.info_installed', ['ceph-common'])
-                if info and 'version' in info[minion]['ceph-common']:
+                if info and info[minion] and 'version' in info[minion]['ceph-common']:
                     version = info[minion]['ceph-common']['version']
                     log.debug("VALIDATE ceph_version: minion ->{}<- info_installed version ->{}<-"
                               .format(minion, version))
@@ -986,7 +988,7 @@ def discovery(cluster=None, printer=None, **kwargs):
     local = salt.client.LocalClient()
 
     # Restrict search to this cluster
-    target = deepsea_minions.DeepseaMinions()
+    target = DeepseaMinions()
     search = target.deepsea_minions
     if 'cluster' in __pillar__:
         if __pillar__['cluster']:
@@ -1058,7 +1060,7 @@ def deploy(**kwargs):
     """
     Verify that Stage 4, Services can succeed.
     """
-    target = deepsea_minions.DeepseaMinions()
+    target = DeepseaMinions()
     search = target.deepsea_minions
     local = salt.client.LocalClient()
     pillar_data = local.cmd(search, 'pillar.items', [], tgt_type="compound")
@@ -1079,7 +1081,7 @@ def saltapi(**kwargs):
     """
     Verify that the Salt API is working
     """
-    target = deepsea_minions.DeepseaMinions()
+    target = DeepseaMinions()
     search = target.deepsea_minions
     local = salt.client.LocalClient()
 
@@ -1108,7 +1110,7 @@ def setup(**kwargs):
     """
     Check that initial files prior to any stage are correct
     """
-    target = deepsea_minions.DeepseaMinions()
+    target = DeepseaMinions()
     search = target.deepsea_minions
     local = salt.client.LocalClient()
 

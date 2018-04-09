@@ -17,7 +17,7 @@ import re
 import pprint
 import yaml
 # pylint: disable=import-error,3rd-party-module-not-gated,redefined-builtin
-from helper import _run
+
 
 log = logging.getLogger(__name__)
 
@@ -219,80 +219,6 @@ def tree():
     return json.dumps(json.loads(output), indent=4)
 
 
-class OSDState(object):
-    """
-    Manage the OSD state
-    """
-
-    def __init__(self, _id, **kwargs):
-        """
-        Initialize settings, connect to Ceph cluster
-        """
-        self.osd_id = _id
-        self.settings = {
-            'conf': "/etc/ceph/ceph.conf",
-            'filename': '/var/run/ceph/osd.{}-weight'.format(id),
-            'timeout': 3600,
-            'delay': 6
-        }
-        self.settings.update(kwargs)
-        self.cluster = rados.Rados(conffile=self.settings['conf'])
-        self.cluster.connect()
-
-    def down(self):
-        """
-        Not implemented
-        """
-        print(self.osd_tree())
-
-    def osd_tree(self):
-        """
-        Return the tree of OSDs
-        """
-        cmd = json.dumps({"prefix": "osd tree", "format": "json"})
-        _, output, _ = self.cluster.mon_command(cmd, b'', timeout=6)
-        log.debug(json.dumps((json.loads(output)['nodes']), indent=4))
-        for entry in json.loads(output)['nodes']:
-            if entry['id'] == self.osd_id:
-                return entry
-        log.warning("ID {} not found".format(self.osd_id))
-        return {}
-
-    def wait(self):
-        """
-        Wait until PGs reach 0 or timeout expires
-        """
-        i = 0
-        while i < self.settings['timeout']/self.settings['delay']:
-            entry = self.osd_tree()
-            if 'pgs' in entry:
-                if entry['pgs'] == 0:
-                    log.info("osd.{} has no PGs".format(self.osd_id))
-                    return
-                else:
-                    if entry['crush_weight'] != '0.0':
-                        msg = "Weight is not 0.0"
-                        log.error(msg)
-                        return msg
-                    log.warning("osd.{} has {} PGs remaining".format(self.osd_id, entry['pgs']))
-            else:
-                log.warning("osd.{} does not exist".format(self.osd_id))
-                return
-            i += 1
-            time.sleep(self.settings['delay'])
-
-        log.debug("Timeout expired")
-        raise RuntimeError("Timeout expired")
-
-
-def down(_id, **kwargs):
-    """
-    Set an OSD to down and wait until the status is down
-    """
-    osdstate = OSDState(_id, **kwargs)
-    osdstate.down()
-
-
 class OSDWeight(object):
     """
     Manage the setting and restoring of OSD crush weights
@@ -352,7 +278,7 @@ class OSDWeight(object):
         cmd = ("ceph --keyring={} --name={} osd crush reweight osd.{} "
                "{}".format(self.settings['keyring'], self.settings['client'],
                            self.osd_id, weight))
-        return _run(cmd)
+        return __salt__['helper.run'](cmd)
 
     def osd_df(self):
         """
@@ -362,11 +288,21 @@ class OSDWeight(object):
         _, output, _ = self.cluster.mon_command(cmd, b'', timeout=6)
         # log.debug(json.dumps((json.loads(output)['nodes']), indent=4))
         for entry in json.loads(output)['nodes']:
-            if entry['id'] == self.osd_id:
+            if entry['id'] == int(self.osd_id):
                 log.debug(pprint.pformat(entry))
                 return entry
         log.warning("ID {} not found".format(self.osd_id))
         return {}
+
+    # pylint: disable=invalid-name
+    def osd_safe_to_destroy(self):
+        """
+        Returns safe-to-destroy output, does not return JSON
+        """
+        cmd = json.dumps({"prefix": "osd safe-to-destroy",
+                          "ids": ["{}".format(self.osd_id)]})
+        rc, _, output = self.cluster.mon_command(cmd, b'', timeout=6)
+        return rc, output
 
     def is_empty(self):
         """
@@ -382,11 +318,15 @@ class OSDWeight(object):
         i = 0
         last_pgs = 0
         while i < self.settings['timeout']/self.settings['delay']:
+            rc, msg = self.osd_safe_to_destroy()
+            if rc == 0:
+                log.info("osd.{} is safe to destroy".format(self.osd_id))
+                return ""
             entry = self.osd_df()
             if 'pgs' in entry:
                 if entry['pgs'] == 0:
-                    log.info("osd.{} has no PGs".format(self.osd_id))
-                    return ""
+                    log.warning("osd.{} has {} PGs remaining but {}".
+                                format(self.osd_id, entry['pgs'], msg))
                 else:
                     log.warning("osd.{} has {} PGs remaining".format(self.osd_id, entry['pgs']))
                     if last_pgs != entry['pgs']:
@@ -394,14 +334,88 @@ class OSDWeight(object):
                         i = 0
                         last_pgs = entry['pgs']
             else:
-                msg = "osd.{} does not exist".format(self.osd_id)
+                msg = "osd.{} does not exist {}".format(self.osd_id, msg)
                 log.warning(msg)
-                return msg
             i += 1
             time.sleep(self.settings['delay'])
 
         log.debug("Timeout expired")
         raise RuntimeError("Timeout expired")
+
+
+class CephPGs(object):
+    """
+    Query PG states and pause until all are active+clean
+    """
+
+    def __init__(self, **kwargs):
+        """
+        Initialize settings, connect to Ceph cluster
+        """
+        self.settings = {
+            'conf': "/etc/ceph/ceph.conf",
+            'timeout': 120,
+            'keyring': '/etc/ceph/ceph.client.admin.keyring',
+            'client': 'client.admin',
+            'delay': 12
+        }
+        self.settings.update(kwargs)
+        log.debug("settings: {}".format(pprint.pformat(self.settings)))
+        self.cluster = rados.Rados(conffile=self.settings['conf'],
+                                   conf=dict(keyring=self.settings['keyring']),
+                                   name=self.settings['client'])
+        try:
+            self.cluster.connect()
+        except Exception as error:
+            raise RuntimeError("connection error: {}".format(error))
+
+    def quiescent(self):
+        """
+        Wait until PGs are active+clean or timeout is reached.  Default is a
+        2 minute sliding window.
+        """
+        i = 0
+        last = []
+        if self.settings['delay'] == 0:
+            raise ValueError("The delay cannot be 0")
+        while i < self.settings['timeout']/self.settings['delay']:
+            current = self.pg_states()
+            if len(current) == 1 and current[0]['name'] == 'active+clean':
+                log.warning("PGs are active+clean")
+                return
+            log.warning("Waiting on active+clean {}".format(pprint.pformat(current)))
+            if self._pg_value(last) != self._pg_value(current):
+                # Making progress - reset counter
+                log.debug("Resetting active+clean counter")
+                i = 0
+                last = current
+
+            i += 1
+            log.debug("iteration: {} last: {} current: {}".
+                      format(i, self._pg_value(last), self._pg_value(current)))
+            time.sleep(self.settings['delay'])
+
+        log.error("Timeout expired waiting on active+clean")
+        raise RuntimeError("Timeout expired waiting on active+clean")
+
+    # pylint: disable=no-self-use
+    def _pg_value(self, entries):
+        """
+        Return the value for the active+clean entry
+        """
+        for entry in entries:
+            if 'name' in entry and entry['name'] == 'active+clean':
+                return entry['num']
+        return 0
+
+    def pg_states(self):
+        """
+        Retrieve pg status from Ceph
+        """
+        cmd = json.dumps({"prefix": "pg stat", "format": "json"})
+        _, output, _ = self.cluster.mon_command(cmd, b'', timeout=6)
+        # log.debug(json.dumps((json.loads(output)['nodes']), indent=4))
+        return json.loads(output)['num_pg_by_state']
 
 
 def _settings(**kwargs):
@@ -421,6 +435,16 @@ def _settings(**kwargs):
         }
         settings.update(kwargs)
     return settings
+
+
+def ceph_quiescent(**kwargs):
+    """
+    Check that PGs are active+clean
+    """
+    settings = _settings(**kwargs)
+
+    ceph_pgs = CephPGs(**settings)
+    ceph_pgs.quiescent()
 
 
 def zero_weight(osd_id, wait=True, **kwargs):
@@ -469,7 +493,7 @@ def readlink(device, follow=True):
     if follow:
         option = '-f'
     cmd = "readlink {} {}".format(option, device)
-    _, stdout, _ = _run(cmd)
+    _, stdout, _ = __salt__['helper.run'](cmd)
     return stdout
 
 
@@ -760,7 +784,7 @@ class OSDPartitions(object):
         pathnames = _find_paths(self.osd.device)
         if pathnames:
             cmd = "sgdisk -Z --clear -g {}".format(self.osd.device)
-            _rc, _stdout, _stderr = _run(cmd)
+            _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
             if _rc != 0:
                 raise RuntimeError("{} failed".format(cmd))
 
@@ -930,17 +954,22 @@ class OSDPartitions(object):
                 cmd = ("/usr/sbin/sgdisk -N {} -t {}:{} "
                        "{}".format(number, number,
                                    self.osd.types[partition_type], device))
-            _rc, _stdout, _stderr = _run(cmd)
+            _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
             if _rc != 0:
+                log.debug("Stdout of {}: {}".format(cmd, _stdout))
+                log.debug("Stderr of {}: {}".format(cmd, _stderr))
                 raise RuntimeError("{} failed".format(cmd))
-            log.info("partprobe disk")
+            log.info("partprobing disk {}".format(device))
             self._part_probe(device)
             # Seems odd to wipe a just created partition ; however, ghost
             # filesystems on reused disks seem to be an issue
             if os.path.exists("{}{}".format(device, number)):
-                wipe_cmd = ("dd if=/dev/zero of={}{} bs=4096 count=1 "
-                            "oflag=direct".format(device, number))
-                _run(wipe_cmd)
+                prefix = ''
+                if device.startswith('/dev/nvme'):
+                    prefix = 'p'
+                wipe_cmd = ("dd if=/dev/zero of={}{}{} bs=4096 count=1 "
+                            "oflag=direct".format(device, prefix, number))
+                __salt__['helper.run'](wipe_cmd)
             index += 1
 
     def _part_probe(self, device):
@@ -951,7 +980,7 @@ class OSDPartitions(object):
         retries = 5
         cmd = "/usr/sbin/partprobe {}".format(device)
         for _ in range(1, retries + 1):
-            _rc, _stdout, _stderr = _run(cmd)
+            _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
             if _rc == 0:
                 return
             time.sleep(wait_time)
@@ -1021,7 +1050,7 @@ class OSDCommands(object):
         Check partition type
         """
         cmd = "/usr/sbin/sgdisk -i {} {}".format(_partition, device)
-        _, result, _ = _run(cmd)
+        _, result, _ = __salt__['helper.run'](cmd)
         _id = "Partition GUID code: {}".format(self.osd.types[partition_type])
         return _id in result
 
@@ -1321,7 +1350,7 @@ class OSDCommands(object):
             return True
         if size:
             cmd = "blockdev --getsize64 {}".format(devicename)
-            _, _stdout, _stderr = _run(cmd)
+            _, _stdout, _stderr = __salt__['helper.run'](cmd)
             bsize = int(_stdout)
             _bytes = self._convert(size)
             if _bytes != bsize:
@@ -1445,15 +1474,15 @@ class OSDRemove(object):
         """
         # Check weight is zero
         cmd = "systemctl disable ceph-osd@{}".format(self.osd_id)
-        _run(cmd)
+        __salt__['helper.run'](cmd)
         # How long with this hang on a broken OSD
         cmd = "systemctl stop ceph-osd@{}".format(self.osd_id)
-        _run(cmd)
+        __salt__['helper.run'](cmd)
         cmd = r"pkill -f ceph-osd.*{}\ --".format(self.osd_id)
-        _run(cmd)
+        __salt__['helper.run'](cmd)
         time.sleep(1)
         cmd = r"pkill -9 -f ceph-osd.*{}\ --".format(self.osd_id)
-        _run(cmd)
+        __salt__['helper.run'](cmd)
         time.sleep(1)
         return ""
 
@@ -1471,7 +1500,7 @@ class OSDRemove(object):
                     mount = entry[0]
                 if mount in mounted:
                     cmd = "umount {}".format(mount)
-                    _rc, _stdout, _stderr = _run(cmd)
+                    _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
                     log.debug("returncode: {}".format(_rc))
                     if _rc != 0:
                         msg = "Unmount failed - check for processes on {}".format(entry[0])
@@ -1481,7 +1510,7 @@ class OSDRemove(object):
 
         if '/dev/dm' in self.partitions['osd']:
             cmd = "dmsetup remove {}".format(self.partitions['osd'])
-            _run(cmd)
+            __salt__['helper.run'](cmd)
         return ""
 
     def _mounted(self):
@@ -1503,7 +1532,7 @@ class OSDRemove(object):
             for _, _partition in six.iteritems(self.partitions):
                 if os.path.exists(_partition):
                     cmd = "dd if=/dev/zero of={} bs=4096 count=1 oflag=direct".format(_partition)
-                    _run(cmd)
+                    __salt__['helper.run'](cmd)
         else:
             msg = "Nothing to wipe - no partitions available"
             log.error(msg)
@@ -1541,7 +1570,7 @@ class OSDRemove(object):
             log.debug("Checking attr {}".format(attr))
             if '/dev/dm' in self.partitions[attr]:
                 cmd = "dmsetup remove {}".format(self.partitions[attr])
-                _run(cmd)
+                __salt__['helper.run'](cmd)
                 continue
 
             short_name = readlink(self.partitions[attr])
@@ -1560,7 +1589,7 @@ class OSDRemove(object):
                     if disk:
                         log.debug("disk: {} partition: {}".format(disk, _partition))
                         cmd = "sgdisk -d {} {}".format(_partition, disk)
-                        _run(cmd)
+                        __salt__['helper.run'](cmd)
             else:
                 log.error("Partition {} does not exist".format(short_name))
 
@@ -1570,12 +1599,12 @@ class OSDRemove(object):
         """
         if self.osd_disk and os.path.exists(self.osd_disk):
             cmd = "blockdev --getsz {}".format(self.osd_disk)
-            _, _stdout, _stderr = _run(cmd)
+            _, _stdout, _stderr = __salt__['helper.run'](cmd)
             end_of_disk = int(_stdout)
             seek_position = int(end_of_disk/4096 - 33)
             cmd = ("dd if=/dev/zero of={} bs=4096 count=33 seek={} "
                    "oflag=direct".format(self.osd_disk, seek_position))
-            _run(cmd)
+            __salt__['helper.run'](cmd)
             return ""
 
     def _delete_osd(self):
@@ -1584,7 +1613,7 @@ class OSDRemove(object):
         """
         if self.osd_disk and os.path.exists(self.osd_disk):
             cmd = "sgdisk -Z --clear -g {}".format(self.osd_disk)
-            _rc, _stdout, _stderr = _run(cmd)
+            _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
             if _rc != 0:
                 raise RuntimeError("{} failed".format(cmd))
 
@@ -1596,7 +1625,7 @@ class OSDRemove(object):
         for cmd in ['udevadm settle --timeout=20',
                     'partprobe',
                     'udevadm settle --timeout=20']:
-            _run(cmd)
+            __salt__['helper.run'](cmd)
 
 
 def remove(osd_id, **kwargs):
@@ -1729,7 +1758,7 @@ class OSDDevices(object):
             if os.path.exists(pathname):
                 cmd = (r"find -L {} -samefile {} \( -name ata* -o -name scsi* "
                        r"-o -name nvme* \)".format(pathname, device))
-                _, _stdout, _stderr = _run(cmd)
+                _, _stdout, _stderr = __salt__['helper.run'](cmd)
                 if _stdout:
                     return _stdout.split()[-1]
                 return readlink(device)
@@ -1843,11 +1872,11 @@ def deploy():
             osdp.clean()
             osdp.partition()
             osdc = OSDCommands(config)
-            _run(osdc.prepare())
-            _run(osdc.activate())
+            __salt__['helper.run'](osdc.prepare())
+            __salt__['helper.run'](osdc.activate())
 
 
-def redeploy(simultaneous=False):
+def redeploy(simultaneous=False, **kwargs):
     """
     Empty all PGs in parallel initially if necessary.  Then remove and
     recreate each OSD that does not match its configuration.
@@ -1862,6 +1891,7 @@ def redeploy(simultaneous=False):
             if is_incorrect(disk):
                 zero_weight(_id, wait=False)
 
+    settings = _settings(**kwargs)
     for _id in __grains__['ceph']:
         _part = _partition(_id)
         # if 'lockbox' in __grains__['ceph'][_id]['partitions']:
@@ -1873,13 +1903,15 @@ def redeploy(simultaneous=False):
         log.info("ID: {}".format(_id))
         log.info("Disk: {}".format(disk))
         if not os.path.exists(_part) or is_incorrect(disk):
-            remove(_id)
+            pgs = CephPGs(**settings)
+            pgs.quiescent()
+            remove(_id, **settings)
             config = OSDConfig(disk)
             osdp = OSDPartitions(config)
             osdp.partition()
             osdc = OSDCommands(config)
-            _run(osdc.prepare())
-            _run(osdc.activate())
+            __salt__['helper.run'](osdc.prepare())
+            __salt__['helper.run'](osdc.activate())
             # not is_prepared(disk)):
 
 
@@ -1926,7 +1958,7 @@ def _fsck(device, _partition):
         prefix = 'p'
     # cmd = "/sbin/fsck -t xfs -n {}{}{}".format(device, prefix, partition)
     cmd = "/usr/sbin/xfs_admin -u {}{}{}".format(device, prefix, _partition)
-    _rc, _stdout, _stderr = _run(cmd)
+    _rc, _stdout, _stderr = __salt__['helper.run'](cmd)
     return _rc == 0
 
 

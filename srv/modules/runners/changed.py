@@ -60,7 +60,7 @@ class Config(object):
         try:
             roles = local.cmd("I@roles:master", 'pillar.get',
                               ['rgw_configurations'],
-                              expr_form="compound").values()[0]
+                              tgt_type="compound").values()[0]
             log.debug("Querying pillar for rgw_configurations")
         # pylint: disable=bare-except
         except:
@@ -175,7 +175,7 @@ def requires_conf_change(service, cluster='ceph'):
             search = 'I@cluster:{} and I@roles:{}'.format(cluster, service)
             local.cmd(search, 'grains.setval',
                       ["restart_{}".format(service), True],
-                      expr_form="compound")
+                      tgt_type="compound")
             return True
     return False
 

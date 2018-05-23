@@ -28,6 +28,9 @@ copy-files:
 	install -m 600 etc/salt/master.d/eauth.conf $(DESTDIR)/etc/salt/master.d/
 	install -m 644 etc/salt/master.d/salt-api.conf $(DESTDIR)/etc/salt/master.d/
 	install -m 600 srv/salt/ceph/salt-api/files/sharedsecret.conf.j2 $(DESTDIR)/etc/salt/master.d/sharedsecret.conf
+	# etc/deepsea files
+	install -d -m 755 $(DESTDIR)/etc/deepsea
+	install -m 644 etc/deepsea/blacklist.yaml $(DESTDIR)/etc/deepsea/
 	# qa
 	install -d -m 755 $(DESTDIR)/usr/lib/deepsea/qa/common
 	install -d -m 755 $(DESTDIR)/usr/lib/deepsea/qa/suites/basic
@@ -76,6 +79,8 @@ copy-files:
 	install -m 644 srv/salt/ceph/tests/restart/rgw/forced/*.sls $(DESTDIR)/srv/salt/ceph/tests/restart/rgw/forced
 	install -m 644 srv/salt/ceph/tests/restart/rgw/nochange/*.sls $(DESTDIR)/srv/salt/ceph/tests/restart/rgw/nochange
 	# smoketests
+	install -d -m 755 $(DESTDIR)/srv/salt/ceph/smoketests
+	install -m 644 srv/salt/ceph/smoketests/*.sls $(DESTDIR)/srv/salt/ceph/smoketests
 	install -d -m 755 $(DESTDIR)/srv/salt/ceph/smoketests/apparmor
 	install -m 644 srv/salt/ceph/smoketests/apparmor/*.sls $(DESTDIR)/srv/salt/ceph/smoketests/apparmor
 	install -d -m 755 $(DESTDIR)/srv/salt/ceph/smoketests/quiescent

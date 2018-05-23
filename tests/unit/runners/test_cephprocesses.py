@@ -7,8 +7,9 @@ from srv.modules.runners import cephprocesses
 
 class TestCephProcesses():
 
+    @patch('srv.modules.runners.cephprocesses.load_blacklist', autospec=True)
     @patch('salt.client.LocalClient', autospec=True)
-    def test_status(self, localclient):
+    def test_status(self, localclient, blacklist_mock):
         result = {'mon1.ceph': True,
                   'mon3.ceph': True,
                   'mon2.ceph': True}
@@ -18,6 +19,7 @@ class TestCephProcesses():
 
         local = localclient.return_value
         local.cmd.return_value = result
+        blacklist_mock.return_value = {}
 
         status = cephprocesses._status(search, roles, False)
         assert status['mon'] == result

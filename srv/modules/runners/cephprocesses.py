@@ -10,6 +10,7 @@ A secondary purpose is a utility to check the current state of all processes.
 import pprint
 import os
 import sys
+import yaml
 import logging
 import salt.client
 import salt.utils
@@ -147,6 +148,12 @@ def need_restart(role=None, cluster='ceph'):
     return False
 
 
+def load_blacklist():
+    with open('/etc/deepsea/blacklist.yaml', 'r') as _bl:
+        content = yaml.safe_load(_bl)
+    return content
+
+
 def _status(search, roles, quiet):
     """
     Return a structure of roles with module results
@@ -158,11 +165,13 @@ def _status(search, roles, quiet):
     status = {}
     local = salt.client.LocalClient()
 
+    blacklist = load_blacklist()
     for role in roles:
         role_search = search + " and I@roles:{}".format(role)
         status[role] = local.cmd(role_search,
                                  'cephprocesses.check',
-                                 kwarg={'roles': [role]},
+                                 kwarg={'roles': [role],
+                                        'blacklist': blacklist},
                                  quiet=quiet,
                                  expr_form="compound")
 

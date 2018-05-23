@@ -11,6 +11,7 @@ import pprint
 import os
 import sys
 import logging
+import yaml
 import salt.client
 import salt.utils
 import salt.utils.master
@@ -147,6 +148,15 @@ def need_restart(role=None, cluster='ceph'):
     return False
 
 
+def load_blacklist():
+    """
+    Loads blacklist from file
+    """
+    with open('/etc/deepsea/blacklist.yaml', 'r') as _bl:
+        content = yaml.safe_load(_bl)
+    return content
+
+
 def _status(search, roles, quiet):
     """
     Return a structure of roles with module results
@@ -158,11 +168,13 @@ def _status(search, roles, quiet):
     status = {}
     local = salt.client.LocalClient()
 
+    blacklist = load_blacklist()
     for role in roles:
         role_search = search + " and I@roles:{}".format(role)
         status[role] = local.cmd(role_search,
                                  'cephprocesses.check',
-                                 kwarg={'roles': [role]},
+                                 kwarg={'roles': [role],
+                                        'blacklist': blacklist},
                                  quiet=quiet,
                                  expr_form="compound")
 
@@ -210,10 +222,14 @@ def wait(cluster='ceph', **kwargs):
 
     status = {}
     local = salt.client.LocalClient()
+    blacklist = load_blacklist()
+    timeout = settings['timeout']
+    delay = settings['delay']
     status = local.cmd(search,
                        'cephprocesses.wait',
-                       ['timeout={}'.format(settings['timeout']),
-                        'delay={}'.format(settings['delay'])],
+                       kwarg={'blacklist': blacklist,
+                              'timeout': timeout,
+                              'delay': delay},
                        expr_form="compound")
 
     sys.stdout = _stdout

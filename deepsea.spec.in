@@ -88,11 +88,7 @@ systemctl try-restart salt-api > /dev/null 2>&1 || :
 %dir %attr(0755, salt, salt) /srv/pillar/ceph/benchmarks/collections
 %dir %attr(0755, salt, salt) /srv/pillar/ceph/benchmarks/fio
 %dir %attr(0755, salt, salt) /srv/pillar/ceph/benchmarks/templates
-<<<<<<< HEAD
-=======
 %dir %attr(0755, salt, salt) /etc/deepsea
-%dir /srv/salt/_modules
->>>>>>> 4bdde794c... Refactor cephprocesses module and add tests for it
 %dir /srv/modules
 %dir /srv/modules/pillar
 %dir /srv/salt/_modules
@@ -688,13 +684,7 @@ the README for more information.
 %dir /srv/salt/ceph/tests/restart/rgw/change
 %dir /srv/salt/ceph/tests/restart/rgw/forced
 %dir /srv/salt/ceph/tests/restart/rgw/nochange
-%dir /srv/salt/ceph/tests/tuned
-%dir /srv/salt/ceph/tests/tuned/off
-/srv/salt/ceph/smoketests/*.sls
 /srv/salt/ceph/smoketests/apparmor/*.sls
-/srv/salt/ceph/smoketests/keyrings/*.sls
-/srv/salt/ceph/smoketests/macros/os_switch/*.sls
-/srv/salt/ceph/smoketests/openstack/*.sls
 /srv/salt/ceph/smoketests/quiescent/*.sls
 /srv/salt/ceph/smoketests/restart/*.sls
 /srv/salt/ceph/tests/quiescent/*.sls

@@ -57,13 +57,13 @@ class ProcInfo(object):
         # the proc object
         self.proc = proc
         # e.g. python3, perl, etc
-        self.exe = os.path.basename(proc.exe())
+        self.exe = os.path.basename(proc.exe)
         # e.g. salt-call, ceph-osd
-        self.name = proc.name()
+        self.name = proc.name
         # e.g. systems pid
         self.pid = proc.pid
         # uid the proc is running under.
-        self.uid = proc.uids().real
+        self.uid = proc.uids.real
         # uid to name. (root, salt.. etc)
         self.uid_name = pwd.getpwuid(self.uid).pw_name
         if self.name == 'ceph-osd':
@@ -72,7 +72,7 @@ class ProcInfo(object):
             self.osd_id = None
         if 'python' in self.exe:
             self.exe = self.name
-        if self.proc.status() == 'running':
+        if self.proc.status == 'running':
             self.up = False
 
     def __repr__(self):
@@ -89,7 +89,7 @@ class ProcInfo(object):
         for the OSD_ID
         """
         osd_id = set()
-        for open_file in self.proc.open_files():
+        for open_file in self.proc.get_open_files():
             mo = re.search('[0-9]+', open_file.path)
             if mo:
                 osd_id.add(mo.group())

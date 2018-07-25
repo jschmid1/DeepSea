@@ -18,17 +18,20 @@ class MockedPsUtil(object):
         self.pid = pid
         self.osd_id = osd_id
 
+    @property
     def name(self):
         return self._name
 
+    @property
     def exe(self):
         return self._exe
 
+    @property
     def uids(self):
         Puids = namedtuple('Puids', 'real effective saved')
         return Puids(self._uid, 0, 0)
 
-    def open_files(self):
+    def get_open_files(self):
         Popenfile = namedtuple('Popenfile', 'path')
         f1 = Popenfile('/var/log/ceph/ceph-osd.{}.log'.format(self.osd_id))
         f2 = Popenfile('/var/lib/ceph/osd/ceph-{}/fsid'.format(self.osd_id))

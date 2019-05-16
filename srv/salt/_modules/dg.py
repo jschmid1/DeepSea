@@ -840,6 +840,31 @@ def _apply_policies(wal_devices: list, db_devices: list) -> bool:
     return True
 
 
+def _should_deploy(drive_group_obj, len_data: int, len_wal: int, len_db: int,
+                   len_journal: int) -> bool:
+    if drive_group_obj.db_device_attrs and not len_db:
+        log.warning(
+            "You specified filters under the db_devices section, but no disks were matched"
+        )
+        return False
+    if drive_group_obj.wal_device_attrs and not len_wal:
+        log.warning(
+            "You specified filters under the FILL_ME section, but no disks were matched"
+        )
+        return False
+    if drive_group_obj.journal_device_attrs and not len_journal:
+        log.warning(
+            "You specified filters under the FILL_ME section, but no disks were matched"
+        )
+        return False
+    if drive_group_obj.data_device_attrs and not len_data:
+        log.warning(
+            "You specified filters under the FILL_ME section, but no disks were matched"
+        )
+        return False
+    return True
+
+
 def list_drives(**kwargs):
     """
     A public method that returns a dict
@@ -895,6 +920,10 @@ def c_v_commands(**kwargs):
     journal_devices = dgo.journal_devices
     if not data_devices:
         return ""
+
+    if not _should_deploy(dgo, len(data_devices), len(wal_devices),
+                          len(db_devices), len(journal_devices)):
+        return ["An error mesasge #TODO "]
 
     if not _apply_policies(wal_devices, db_devices):
         raise ConfigError(

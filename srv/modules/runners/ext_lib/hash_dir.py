@@ -8,14 +8,14 @@ from .pillar import proposal
 
 def update_pillar():
     local_client = salt.client.LocalClient()
-    print('In this case we update the pillar')
+    print('Updating the pillar')
     proposal()
     ret: str = local_client.cmd(
         "cluster:ceph", 'state.apply', ['ceph.refresh'], tgt_type='pillar')
     # if (accumulated)ret == 0:
     # update md5()
     # TODO catch errors here
-    print("Now we update the md5")
+    print("Updating the directory's checksum")
     update_md5()
     print("The pillar should be in sync now")
 
@@ -78,5 +78,3 @@ def pillar_questioneer():
             update_pillar()
         else:
             print("\nNot updating the pillar, please keep in mind that lalalalala")
-    # DEBUG
-    print(f"The pillar has still changes: {pillar_has_changes()}")

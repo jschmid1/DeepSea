@@ -11,6 +11,7 @@ import json
 import logging
 # pylint: disable=import-error,3rd-party-module-not-gated
 import salt.ext.six as six
+from subprocess import check_output, CalledProcessError
 import rados
 # pylint: disable=incompatible-py3-code
 log = logging.getLogger(__name__)
@@ -61,6 +62,39 @@ class Monitors(object):
         dump = json.loads(output)['mons']
         log.debug("status: {}".format(dump))
         return dump
+
+
+def already_running():
+    # check if a container is already running.
+    # Check the higher-level instance - systemd.
+
+    ## there needs to be a second check for existence..
+    ## we might have the case where a mon is down, but still exists
+    ## check for directory existence? or for podman image existance?
+
+    # TODO: refine the logic when to return false/true..
+
+
+    # is /host/ fine?
+    mon_name = __grains__.get('host', '')
+    if not mon_name:
+        log.error("Could not retrieve host grain. Aborting")
+        return False
+    try:
+        status = check_output(
+            ['systemctl', 'is-active',
+            f'ceph-mon@{mon_name}.service']).decode('utf-8').strip()
+    except CalledProcessError as e:
+        log.info(f'{e}')
+        return False
+    if status == 'active':
+        return True
+    elif status == 'inactive' or os.path.exists(f'/var/lib/ceph/mon/ceph-{mon_name}'):
+        return False
+    else:
+        log.error(f"Could not determine state of {mon_name}")
+        return False
+
 
 
 def list_(**kwargs):

@@ -1,5 +1,6 @@
 import os
 import logging
+import shutil
 import sys
 from distutils.spawn import find_executable
 from os.path import expanduser
@@ -7,6 +8,10 @@ from subprocess import check_output, CalledProcessError
 from typing import List, Dict, Sequence
 
 logger = logging.getLogger(__name__)
+
+# TODO: add proper return codes
+# TODO: get rid of hardcoded values
+# TODO: get rid of ceph.conf
 
 
 class CephContainer(object):
@@ -141,7 +146,6 @@ def extract_keyring(image):
     return mon_keyring
 
 
-
 def extract_mon_map(image):
     mon_map_path = '/var/lib/ceph/tmp'
     mon_map = f'{mon_map_path}/mon_map'
@@ -160,24 +164,61 @@ def extract_mon_map(image):
     return mon_map
 
 
-def create_mon(image,  mon_name, uid=0, gid=0):
+def create_mon(image, uid=0, gid=0, start=True):
     map_filename = extract_mon_map(image)
+    # TODO: boostrap
     #mon_keyring_path = create_initial_keyring(image)
     mon_keyring_path = extract_keyring(image)
+
+    mon_name = __grains__.get('host', '')
+    assert mon_name
 
     CephContainer(
         image=image,
         entrypoint='ceph-mon',
         args=[
-            '--mkfs', '-i', mon_name, '--keyring',
-            mon_keyring_path, '--monmap', map_filename
+            '--mkfs', '-i', mon_name, '--keyring', mon_keyring_path,
+            '--monmap', map_filename
         ] + user_args(uid, gid),
         volume_mounts={
             '/var/lib/ceph/': '/var/lib/ceph'
         }).run()
 
-    # source these information from somewhere else
-    start_mon(image, mon_name, mon_keyring_path, '172.16.2.254', '172.16.1.254', mon_initial_members='172.16.1.13')
+    # source this (hardcoded) information from somewhere else
+    if start:
+        start_mon(
+            image,
+            mon_name,
+            mon_keyring_path,
+            '172.16.2.254',
+            '172.16.1.254',
+            mon_initial_members='172.16.1.13')
+        return True
+    return True
+
+
+def remove_mon(image):
+    mon_name = __grains__.get('host', '')
+    assert mon_name
+    CephContainer(
+        image=image,
+        entrypoint='ceph',
+        args=['mon', 'remove', mon_name],
+        volume_mounts={
+            '/var/lib/ceph': '/var/lib/ceph:z',
+            '/var/run/ceph': '/var/run/ceph:z',
+            '/etc/ceph': '/etc/ceph:ro',
+            '/etc/localtime': '/etc/localtime:ro',
+            '/var/log/ceph': '/var/log/ceph:z'
+        },
+        name='ceph-mon-removed',
+    ).run()
+
+    # check_output(['systemctl', 'stop', f'ceph-mon@{mon_name}.service'])
+    # check_output(['systemctl', 'disable', f'ceph-mon@{mon_name}.service'])
+    rmdir(f'/var/lib/ceph/mon/ceph-{mon_name}')
+    rmfile(f'/usr/lib/systemd/system/ceph-mon@.service')
+    return True
 
 
 def start_mon(image,
@@ -213,8 +254,7 @@ def start_mon(image,
         },
         name='ceph-mon-%i',
     )
-    unit_path = expanduser(
-        '/usr/lib/systemd/system')  # TODO: use system-wide location
+    unit_path = expanduser('/usr/lib/systemd/system')
     makedirs(unit_path)
     logger.info(mon_container.run_cmd)
     print(" ".join(mon_container.run_cmd))
@@ -235,12 +275,9 @@ TimeoutStopSec=15
 [Install]
 WantedBy=multi-user.target
 """)
-    check_output(
-        ['systemctl', 'disable', f'ceph-mon@{mon_name}.service'])
-    check_output(
-        ['systemctl', 'enable', f'ceph-mon@{mon_name}.service'])
-    check_output(
-        ['systemctl', 'start', f'ceph-mon@{mon_name}.service'])
+    check_output(['systemctl', 'disable', f'ceph-mon@{mon_name}.service'])
+    check_output(['systemctl', 'enable', f'ceph-mon@{mon_name}.service'])
+    check_output(['systemctl', 'start', f'ceph-mon@{mon_name}.service'])
     logger.info(f'See > journalctl --user -f -u ceph-mon@{mon_name}.service')
     print(f'See > journalctl --user -f -u ceph-mon@{mon_name}.service')
 
@@ -280,3 +317,13 @@ def find_program(filename):
 
 def makedirs(dir):
     os.makedirs(dir, exist_ok=True)
+
+
+def rmfile(filename):
+    if os.path.exists(filename):
+        os.remove(filename)
+
+
+def rmdir(dir):
+    if os.path.exists(dir):
+        shutil.rmtree(dir)

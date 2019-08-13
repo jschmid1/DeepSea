@@ -64,4 +64,5 @@ def remove():
 
 
 def update():
+    """ How to query/pull from the registry? """
     pass

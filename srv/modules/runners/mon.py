@@ -1,4 +1,4 @@
-from ext_lib.hash_dir import pillar_questioneer
+from ext_lib.hash_dir import pillar_questioneer, module_questioneer
 from salt.client import LocalClient
 
 # TODO: implement non-interactive mode
@@ -6,6 +6,7 @@ from salt.client import LocalClient
 
 def deploy():
     pillar_questioneer()
+    module_questioneer()
     # 'target' <- roles with 'role' foo.
     # call podman module targeting 'target'
     # podman modules figures out if we need to re-deploy/newly create

@@ -127,23 +127,23 @@ def create_initial_keyring(image):
 
 
 def extract_keyring(image):
-    mon_keyring_path = '/var/lib/ceph/tmp'
-    mon_keyring = f'{mon_keyring_path}/keyring'
+    keyring_path = '/var/lib/ceph/tmp'
+    keyring = f'{keyring_path}/mon.keyring'
+    makedirs(keyring_path)
 
-    makedirs(mon_keyring_path)
 
     CephContainer(
         image=image,
         entrypoint='ceph',
-        args=f'auth get mon. -o {mon_keyring}'.split(),
+        args=f'auth get-or-create mon. -o {keyring}'.split(),
         volume_mounts={
             '/var/lib/ceph/': '/var/lib/ceph',
             # etc ceph needs to go away, how does one query ceph auth get mon without the ceph.conf needs?
             '/etc/ceph/': '/etc/ceph'
         }).run()
 
-    logger.info(f'{mon_keyring} extracted')
-    return mon_keyring
+    logger.info(f'{keyring} extracted')
+    return keyring
 
 
 def extract_mon_map(image):
@@ -165,12 +165,13 @@ def extract_mon_map(image):
 
 
 def create_mon(image, uid=0, gid=0, start=True):
+    mon_name = __grains__.get('host', '')
     map_filename = extract_mon_map(image)
     # TODO: boostrap
     #mon_keyring_path = create_initial_keyring(image)
     mon_keyring_path = extract_keyring(image)
+    makedirs(f'/var/lib/ceph/mon/ceph-{mon_name}')
 
-    mon_name = __grains__.get('host', '')
     assert mon_name
 
     CephContainer(
@@ -196,6 +197,28 @@ def create_mon(image, uid=0, gid=0, start=True):
         return True
     return True
 
+def create_mgr(image, uid=0, gid=0, start=True):
+    # TODO: boostrap
+    #mon_keyring_path = create_initial_keyring(image)
+    mgr_name = __grains__.get('host', '')
+    assert mgr_name
+    mgr_keyring_path = extract_keyring(image, role='mgr', name=mgr_name)
+    # move
+    keyring_location = f'/var/lib/ceph/mgr/ceph-{mgr_name}'
+    makedirs(keyring_location)
+    shutil.copyfile(mgr_keyring_path, f'{keyring_location}/keyring')
+
+    CephContainer(
+        image=image,
+        entrypoint='ceph-mgr',
+        args=[
+            '-i', mgr_name
+        ] + user_args(uid, gid),
+        volume_mounts={
+            '/var/lib/ceph/': '/var/lib/ceph',
+            '/etc/ceph/': '/etc/ceph'
+        }).run()
+
 
 def remove_mon(image):
     mon_name = __grains__.get('host', '')
@@ -214,8 +237,8 @@ def remove_mon(image):
         name='ceph-mon-removed',
     ).run()
 
-    # check_output(['systemctl', 'stop', f'ceph-mon@{mon_name}.service'])
-    # check_output(['systemctl', 'disable', f'ceph-mon@{mon_name}.service'])
+    check_output(['systemctl', 'stop', f'ceph-mon@{mon_name}.service'])
+    check_output(['systemctl', 'disable', f'ceph-mon@{mon_name}.service'])
     rmdir(f'/var/lib/ceph/mon/ceph-{mon_name}')
     rmfile(f'/usr/lib/systemd/system/ceph-mon@.service')
     return True
@@ -280,10 +303,6 @@ WantedBy=multi-user.target
     check_output(['systemctl', 'start', f'ceph-mon@{mon_name}.service'])
     logger.info(f'See > journalctl --user -f -u ceph-mon@{mon_name}.service')
     print(f'See > journalctl --user -f -u ceph-mon@{mon_name}.service')
-
-
-def create_mgr():
-    pass
 
 
 # Utils

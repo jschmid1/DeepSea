@@ -46,8 +46,11 @@ def deploy():
 
 def remove():
     pillar_questioneer()
-    already_running = LocalClient().cmd("I@cluster:ceph and not I@roles:mon", 'mon.already_running', tgt_type='compound')
-    to_remove = [k for (k,v) in already_running.items() if v]
+    already_running = LocalClient().cmd(
+        "I@cluster:ceph and not I@roles:mon",
+        'mon.already_running',
+        tgt_type='compound')
+    to_remove = [k for (k, v) in already_running.items() if v]
     if not to_remove:
         print("Nothing to remove. Exiting..")
         return True
@@ -58,3 +61,7 @@ def remove():
         ['registry.suse.de/devel/storage/6.0/images/ses/6/ceph/ceph'],
         tgt_type='list')
     return True
+
+
+def update():
+    pass

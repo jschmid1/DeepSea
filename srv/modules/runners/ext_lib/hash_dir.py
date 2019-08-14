@@ -11,7 +11,7 @@ def update_pillar(directory, checksum):
     print('Updating the pillar')
     proposal()
     ret: str = local_client.cmd(
-        "cluster:ceph", 'state.apply', ['ceph.refresh'], tgt_type='pillar')
+        "I@deepsea_minions:*", 'state.apply', ['ceph.refresh'], tgt_type='compound')
     # if (accumulated)ret == 0:
     # update md5()
     # TODO catch errors here
@@ -83,14 +83,17 @@ def minion_modules_have_changes(directory, checksum_path):
     return False
 
 
-def pillar_questioneer():
+def pillar_questioneer(non_interactive=False):
     directory = '/srv/pillar/ceph'
     checksum_path = f'{directory}/.md5.save'
     if pillar_has_changes(directory, checksum_path):
         print(
             "You have pending changes in the pillar that needs to be synced to the minions. Would you like to sync now?"
         )
-        answer = input("(y/n)")
+        if non_interactive:
+            answer = 'y'
+        else:
+            answer = input("(y/n)")
         if answer.lower() == 'y':
             update_pillar(directory, checksum_path)
         else:
@@ -99,14 +102,17 @@ def pillar_questioneer():
             )
 
 
-def module_questioneer():
+def module_questioneer(non_interactive=False):
     directory = '/srv/salt/_modules'
     checksum_path = '/srv/salt/ceph/.modules.md5.save'
     if minion_modules_have_changes(directory, checksum_path):
         print(
             "You have pending changes in the modules direcotry that needs to be synced to the minions. Would you like to sync now?"
         )
-        answer = input("(y/n)")
+        if non_interactive:
+            answer = 'y'
+        else:
+            answer = input("(y/n)")
         if answer.lower() == 'y':
             sync_modules(directory, checksum_path)
         else:

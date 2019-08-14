@@ -27,7 +27,7 @@ def deploy():
         if not v:
             mon_candidates.append(k)
     if mon_candidates:
-        print(f"These minions will be mons: {' '.join(mon_candidates)}")
+        print(f"These minions will be mons: {', '.join(mon_candidates)}")
         user_inp = input("Do you want to continue? (y/n)")
         if user_inp.lower() == 'y':
             print("Deploying..")
@@ -37,9 +37,9 @@ def deploy():
                 ['registry.suse.de/devel/storage/6.0/images/ses/6/ceph/ceph'],
                 tgt_type='list')
             # improve returncode reporting
-            print("Mon(s) created")
+            print(f"Mon(s) created on {', '.join(mon_candidates)}")
             return True
-        print("Aborted..")
+        return "Aborted."
     else:
         print("No candidates for a mon deployment found")
 

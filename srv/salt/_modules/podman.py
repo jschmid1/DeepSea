@@ -68,7 +68,6 @@ def ceph_cli(image, passed_args=['--version']):
             args=passed_args,
             volume_mounts={
                 '/var/lib/ceph': '/var/lib/ceph:z',
-                '/etc/ceph': '/etc/ceph:z',
                 '/var/run/ceph': '/var/run/ceph:z',
                 '/etc/localtime': '/etc/localtime:ro',
                 '/var/log/ceph': '/var/log/ceph:z'
@@ -79,38 +78,55 @@ def ceph_cli(image, passed_args=['--version']):
         sys.exit(1)
 
 
-def bootstrap_cluster(image,
-                      fsid=None,
-                      mon_name=None,
-                      cluster_addr=None,
-                      public_addr=None,
-                      uid=0,
-                      gid=0):
+"""
+bootstrap
+ceph-authtool --create-keyring /tmp/bootstrap_keyring --gen-key -n mon.
+ceph-authtool /tmp/bootstrap_keyring --gen-key -n client.admin --cap mon 'allow *' --cap osd 'allow *' --cap mds 'allow'
+(maybe) ceph-authtool --create-keyring /var/lib/ceph/bootstrap-osd/ceph.keyring --gen-key -n client.bootstrap-osd --cap mon 'profile bootstrap-osd'
+monmaptool --create --add {hostname} {ip-address} --fsid {uuid} /tmp/monmap
+mkdir /var/lib/ceph/mon/ceph-{hostname}
+ceph-mon --mkfs -i admin --public-network 172.16.1.0/24 --cluster-network 172.16.2.0/24 --keyring /tmp/bootstrap_keyring --monmap /tmp/monmap -f -d
+"""
+
+
+def _get_public_network():
+    # need validation?
+    return __salt__['pillar.get']('public_network', '')
+
+
+def _get_cluster_network():
+    # need validation?
+    return __salt__['pillar.get']('cluster_network', '')
+
+
+def _get_public_address():
+    # need validation?
+    return __salt__['public.address']()
+
+
+def make_monmap(image, fsid=None):
+    # monmaptool --create --add {hostname} {ip-address} --fsid {uuid} /tmp/monmap
+    hostname = get_hostname()
+    ip_address = _get_public_address()
     fsid = fsid or make_fsid()
-    mon_name = mon_name or get_hostname()
-    assert cluster_addr, 'TODO: make proper default'
-    assert public_addr, 'TODO: make proper default'
-
-    mon_keyring_path = create_initial_keyring(image)
-    create_mon(
-        image, mon_keyring_path, fsid, mon_name=mon_name, uid=uid, gid=gid)
-    start_mon(
+    dest = '/tmp/bootstrap_monmap'
+    CephContainer(
         image,
-        fsid,
-        mon_name,
-        mon_keyring_path,
-        cluster_addr,
-        public_addr,
-        mon_initial_members=mon_name,
-        uid=uid,
-        gid=gid)
+        entrypoint='monmaptool',
+        args=
+        f'--create --add {hostname} {ip_address} --fsid {fsid} {dest} --clobber'
+        .split(),
+        volume_mounts={
+            '/tmp': '/tmp'
+        }).run()
 
-    create_mgr()
+    logger.info(f'Initial mon_map created here: {dest}')
+    return dest
 
 
 def create_initial_keyring(image):
-    mon_keyring_path = '/var/lib/ceph/tmp'
-    mon_keyring = f'{mon_keyring_path}/keyring'
+    mon_keyring_path = '/tmp'
+    mon_keyring = f'{mon_keyring_path}/bootstrap_keyring'
 
     makedirs(mon_keyring_path)
 
@@ -119,7 +135,7 @@ def create_initial_keyring(image):
         entrypoint='ceph-authtool',
         args=f'--create-keyring {mon_keyring} --gen-key -n mon.'.split(),
         volume_mounts={
-            '/var/lib/ceph/': '/var/lib/ceph'
+            '/tmp': '/tmp'
         }).run()
 
     logger.info(f'{mon_keyring} created')
@@ -130,7 +146,6 @@ def extract_keyring(image):
     keyring_path = '/var/lib/ceph/tmp'
     keyring = f'{keyring_path}/mon.keyring'
     makedirs(keyring_path)
-
 
     CephContainer(
         image=image,
@@ -164,14 +179,24 @@ def extract_mon_map(image):
     return mon_map
 
 
-def create_mon(image, uid=0, gid=0, start=True):
-    mon_name = __grains__.get('host', '')
-    map_filename = extract_mon_map(image)
-    # TODO: boostrap
-    #mon_keyring_path = create_initial_keyring(image)
-    mon_keyring_path = extract_keyring(image)
-    makedirs(f'/var/lib/ceph/mon/ceph-{mon_name}')
+def create_mon(image, uid=0, gid=0, start=True, bootstrap=False):
+    mon_name = get_hostname()
+    if bootstrap:
+        map_filename = make_monmap(image)  #TODO
+        mon_keyring_path = create_initial_keyring(image)
+    else:
+        map_filename = extract_mon_map(image)
+        mon_keyring_path = extract_keyring(image)
 
+    makedirs(f'/var/lib/ceph/mon/ceph-{mon_name}')
+    makedirs(f'/var/log/ceph')
+    cluster_network = _get_cluster_network()
+    public_network = _get_public_network()
+
+    assert cluster_network
+    assert public_network
+    assert map_filename
+    assert mon_keyring_path
     assert mon_name
 
     CephContainer(
@@ -179,10 +204,12 @@ def create_mon(image, uid=0, gid=0, start=True):
         entrypoint='ceph-mon',
         args=[
             '--mkfs', '-i', mon_name, '--keyring', mon_keyring_path,
-            '--monmap', map_filename
+            '--monmap', map_filename, '--public-network', public_network,
+            '--cluster_network', cluster_network
         ] + user_args(uid, gid),
         volume_mounts={
-            '/var/lib/ceph/': '/var/lib/ceph'
+            '/var/lib/ceph/': '/var/lib/ceph',
+            '/tmp': '/tmp'
         }).run()
 
     # source this (hardcoded) information from somewhere else
@@ -193,9 +220,10 @@ def create_mon(image, uid=0, gid=0, start=True):
             mon_keyring_path,
             '172.16.2.254',
             '172.16.1.254',
-            mon_initial_members='172.16.1.13')
+            mon_initial_members=_get_public_address())
         return True
     return True
+
 
 def create_mgr(image, uid=0, gid=0, start=True):
     # TODO: boostrap
@@ -211,9 +239,7 @@ def create_mgr(image, uid=0, gid=0, start=True):
     CephContainer(
         image=image,
         entrypoint='ceph-mgr',
-        args=[
-            '-i', mgr_name
-        ] + user_args(uid, gid),
+        args=['-i', mgr_name] + user_args(uid, gid),
         volume_mounts={
             '/var/lib/ceph/': '/var/lib/ceph',
             '/etc/ceph/': '/etc/ceph'
@@ -318,8 +344,7 @@ def user_args(uid, gid):
 
 
 def get_hostname():
-    import socket
-    return socket.gethostname()
+    return __salt__['grains.get']('host', '')
 
 
 def make_fsid():

@@ -33,12 +33,14 @@ def _read_policy_cfg():
     with open(policy_path, 'r') as _fd:
         return _fd.read()
 
+def _get_public_address():
+    __salt__['public.address']
+
 def ceph():
     print("TODO make sure that podman is installed")
     print("TODO zypper in -t pattern apparmor")
     # or add suse-certs repo and install SUSE-CA
-    print("TODO podman pull registry.suse.de/devel/storage/6.0/images/ses/6/ceph/ceph --tls-verify=false
-")
+    print("TODO podman pull registry.suse.de/devel/storage/6.0/images/ses/6/ceph/ceph --tls-verify=false")
     print("Print a basic help thing explaining the steps and asking for a timeserver")
     qrunner = runner(__opts__)
     if not exists(proposals_dir):

@@ -66,6 +66,7 @@ class CephContainer:
 
     def run(self):
         try:
+            print(" ".join(self.run_cmd()))
             ret = run(
                 self.run_cmd(),
                 stdout=PIPE,

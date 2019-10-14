@@ -7,6 +7,15 @@ from distutils.spawn import find_executable
 LOG_DIR_MODE = 0o770
 DATA_DIR_MODE = 0o700
 
+def extract_uid_gid(container, image):
+    # TODO: args
+    out = container(
+        image=image,
+        entrypoint='/usr/bin/grep',
+        args=['ceph', '/etc/passwd'],
+    ).run()
+    (uid, gid) = out.stdout.split(':')[2:4]
+    return (int(uid), int(gid))
 
 def pathify(p):
     if '/' not in p:

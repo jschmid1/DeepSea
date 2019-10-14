@@ -34,8 +34,9 @@ import time
 
 from argparser import cmdline_args
 from container import CephContainer
-from utils import make_fsid, get_hostname, create_daemon_dirs, get_data_dir, get_log_dir, get_daemon_args, get_container_mounts, get_unit_name
+from utils import make_fsid, get_hostname, create_daemon_dirs, get_data_dir, get_log_dir, get_daemon_args, get_container_mounts, get_unit_name, extract_uid_gid
 from config import Config
+from keyrings import Keyring
 
 try:
     from StringIO import StringIO
@@ -623,15 +624,6 @@ def command_rm_cluster():
         ['rm', '-rf', args.log_dir + '/*.wants/ceph-%s@*' % args.fsid])
 
 
-def extract_uid_gid(image):
-    # TODO: args
-    out = CephContainer(
-        image=image,
-        entrypoint='/usr/bin/grep',
-        args=['ceph', '/etc/passwd'],
-    ).run()
-    (uid, gid) = out.stdout.split(':')[2:4]
-    return (int(uid), int(gid))
 
 
 ##################################
@@ -660,73 +652,28 @@ class Deploy(object):
 class Bootstrap(object):
     def __init__(self, args):
         self.config = Config(args)
+        # TODO: this sucks
+        self.config.ceph_uid, self.config.ceph_gid = extract_uid_gid(CephContainer, self.image)
+        self.keyring = Keyring(self.config)
+        self.directory = Directory(self.config)
         self.bootstrap()
 
     def __getattr__(self, attr):
+        # Inheritance vs Composition..
         return getattr(self.config, attr)
 
-    def bootstrap(self):
-        logging.info('Cluster fsid: %s' % self.fsid)
-
-        logging.info('Extracting ceph user uid/gid from container image...')
-        (uid, gid) = extract_uid_gid(self.image)
-
-        import pdb;pdb.set_trace()
-
-        from keyrings import create_mon_key
-        mon_key = create_mon_key(self.image)
-
-
-        admin_key = CephContainer(
-            image=self.image,
-            entrypoint='/usr/bin/ceph-authtool',
-            args=['--gen-print-key'],
-        ).run().stdout
-        mgr_key = CephContainer(
-            image=self.image,
-            entrypoint='/usr/bin/ceph-authtool',
-            args=['--gen-print-key'],
-        ).run().stdout
-
-        keyring = ('[mon.]\n'
-                   '\tkey = %s\n'
-                   '\tcaps mon = allow *\n'
-                   '[client.admin]\n'
-                   '\tkey = %s\n'
-                   '\tcaps mon = allow *\n'
-                   '\tcaps mds = allow *\n'
-                   '\tcaps mgr = allow *\n'
-                   '\tcaps osd = allow *\n'
-                   '[mgr.%s]\n'
-                   '\tkey = %s\n'
-                   '\tcaps mon = allow profile mgr\n'
-                   '\tcaps mds = allow *\n'
-                   '\tcaps osd = allow *\n' % (mon_key, admin_key, self.mgr_id,
-                                               mgr_key))
-
-        # tmp keyring file
-        tmp_keyring = tempfile.NamedTemporaryFile(mode='w')
-        os.fchmod(tmp_keyring.fileno(), 0o600)
-        os.fchown(tmp_keyring.fileno(), self.ceph_uid, self.ceph_gid)
-        tmp_keyring.write(keyring)
-        tmp_keyring.flush()
-
+    def create_initial_config(self):
         # config
         cp = configparser.ConfigParser()
         cp.add_section('global')
-        if self.mon_ip:
-            addr_arg = '[v2:%s:3300,v1:%s:6789]' % (self.mon_ip, self.mon_ip)
-        elif args.mon_addrv:
-            addr_arg = self.mon_addrv
-        else:
-            raise RuntimeError('must specify --mon-ip or --mon-addrv')
-
         cp['global']['fsid'] = self.fsid
-        cp['global']['mon host'] = addr_arg
+        cp['global']['mon host'] = self.addr_arg
         with StringIO() as f:
             cp.write(f)
             config = f.getvalue()
+        return config
 
+    def create_monmap(self):
         # create initial monmap, tmp monmap file
         logging.info('Creating initial monmap...')
         tmp_monmap = tempfile.NamedTemporaryFile(mode='w')
@@ -736,24 +683,28 @@ class Bootstrap(object):
             entrypoint='/usr/bin/monmaptool',
             args=[
                 '--create', '--clobber', '--fsid', self.fsid, '--addv',
-                self.mon_id, addr_arg, '/tmp/monmap'
+                self.mon_id, self.addr_arg, '/tmp/monmap'
             ],
             volume_mounts={
                 tmp_monmap.name: '/tmp/monmap:z',
             },
         ).run().stdout
+        return out
+
+    def bootstrap(self):
+        logging.info('Cluster fsid: %s' % self.fsid)
+
+        keyring, _, admin_key, mgr_key = self.keyring.create_initial_keyring(self.mgr_id)
+
+
+        tmp_keyring = self.keyring.write_tmp_keyring(keyring)
+
+        config = self.create_initial_config()
 
         # create mon
         logging.info('Creating mon...')
 
-        create_daemon_dirs(
-            self.fsid,
-            'mon',
-            self.mon_id,
-            self.ceph_uid,
-            self.ceph_gid,
-            data_dir=self.data_dir,
-            log_dir=self.log_dir)
+        self.directory.create_daemon_dirs(daemon_type='mon', daemon_id=self.mon_id)
 
         mon_dir = get_data_dir(self.fsid, 'mon', self.mon_id, self.data_dir)
         log_dir = get_log_dir(self.fsid, self.log_dir)
@@ -782,7 +733,7 @@ class Bootstrap(object):
         ).run()
 
         with open(mon_dir + '/config', 'w') as f:
-            os.fchown(f.fileno(), uid, gid)
+            os.fchown(f.fileno(), self.ceph_uid, self.ceph_gid)
             os.fchmod(f.fileno(), 0o600)
             f.write(config)
 

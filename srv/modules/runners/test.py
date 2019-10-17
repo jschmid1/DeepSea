@@ -88,13 +88,13 @@ def good(non_interactive=False, called_by_runner=False, called_by_orch=False):
     # maybe we should collect the 'data' var aswell..
     results.append(result)
 
-    # TODO: have success returns for orch and runners aswell.
-    return humanize_return(all(results))
+    return results
 
 
 @catches(ModuleException)
 def bad(called_by_runner=False, called_by_orch=False):
-    # This is a module call behind the scene
+    results = list()
+
 
     result, data = exec_module(
         module='keyring',
@@ -103,6 +103,9 @@ def bad(called_by_runner=False, called_by_orch=False):
         arguments=['admin'])
     # TODO:
         # kwargs implementation is missing
+    results.append(result)
+
+    return results
 
 
 @catches(RunnerException)
@@ -114,13 +117,19 @@ def runner_calls_runner(called_by_runner=False, called_by_orch=False):
     """
     # This is a runner that calls a module behind the scene
 
+    results = list()
+
     #                                        this can be offloaded to exec_runner
-    result, data = exec_runner('test.good', ['called_by_runner=True'])
-    result, data = exec_runner('test.bad', ['called_by_runner=True'])
-    result, data = exec_runner('test.good', ['called_by_runner=True'])
+    result, data = exec_runner('test.good')
+    results.append(result)
+    result, data = exec_runner('test.bad')
+    results.append(result)
+    result, data = exec_runner('test.good')
+    results.append(result)
+
+    return results
 
 @catches(RunnerException)
 def runner_calls_runner_calls_runner(called_by_runner=False,
                                      called_by_orch=False):
-    result, data = exec_runner('test.runner_calls_runner',
-                                ['called_by_runner=True'])
+    result, data = exec_runner('test.runner_calls_runner')

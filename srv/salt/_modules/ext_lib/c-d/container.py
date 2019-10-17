@@ -64,6 +64,7 @@ class CephContainer:
             '--entrypoint', '/bin/bash', self.image
         ]
 
+
     def run(self):
         try:
             print(" ".join(self.run_cmd()))

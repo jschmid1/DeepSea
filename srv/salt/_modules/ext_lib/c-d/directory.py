@@ -22,19 +22,20 @@ class Directory(object):
         # TODO: move to getter/setter
         self.daemon_type = daemon_type
         self.daemon_id = daemon_id
+
         # TODO: move to getter/setter
         data_dir = self.make_data_dir()
         log_dir = self.make_log_dir()
 
         if config:
             with open(data_dir + '/config', 'w') as f:
-                os.fchown(f.fileno(), uid, gid)
+                os.fchown(f.fileno(), self.ceph_uid, self.ceph_gid)
                 os.fchmod(f.fileno(), 0o600)
                 f.write(config)
         if keyring:
             with open(data_dir + '/keyring', 'w') as f:
                 os.fchmod(f.fileno(), 0o600)
-                os.fchown(f.fileno(), uid, gid)
+                os.fchown(f.fileno(), self.ceph_uid, self.ceph_gid)
                 f.write(keyring)
 
     def get_log_dir(self):

@@ -5,6 +5,8 @@ from utils import get_daemon_args, get_unit_name
 import tempfile
 import os
 import logging
+import json
+import time
 
 
 class Operation(object):
@@ -20,7 +22,9 @@ class Operation(object):
         logging.info('Creating mgr...')
         mgr_keyring = '[mgr.%s]\n\tkey = %s\n' % (self.mgr_id, mgr_key)
         mgr_c = self.get_container('mgr', self.mgr_id)
-        self.deploy_daemon('mgr', self.mgr_id)
+        # get ceph_conf
+        self.deploy_daemon(
+            'mgr', self.mgr_id, container=mgr_c, keyring=mgr_keyring)
 
     def create_monmap(self):
         # create initial monmap, tmp monmap file
@@ -83,7 +87,6 @@ class Operation(object):
             f.write(config)
 
         mon_c = self.get_container(daemon_type, daemon_id)
-
         self.deploy_daemon_units('mon', self.mon_id, mon_c)
 
     def get_container(self,
@@ -141,6 +144,7 @@ class Operation(object):
                             enable=True,
                             start=True):
         # cmd
+
         data_dir = self.directory.get_data_dir(
             daemon_type=daemon_type, daemon_id=daemon_id)
         with open(data_dir + '/cmd', 'w') as f:
@@ -242,6 +246,7 @@ class Operation(object):
     def deploy_daemon(self,
                       daemon_type,
                       daemon_id,
+                      container=None,
                       config=None,
                       keyring=None):
         # TODO: args
@@ -267,26 +272,14 @@ class Operation(object):
             tmp_config.flush()
 
             # --mkfs
-            self.directory.create_daemon_dirs(daemon_type=daemon_type, daemon_id=daemon_id)
-
-
-            # THIS IS FOR TOMORROW!
-            import pdb;pdb.set_trace()
-            # Reconsider this path.. this must be more efficient
-
-
-            # THIS IS FOR TOMORROW!
-
-
-            # THIS IS FOR TOMORROW!
-
-
-
+            self.directory.create_daemon_dirs(
+                daemon_type=daemon_type, daemon_id=daemon_id)
 
             mon_dir = get_data_dir(fsid, 'mon', daemon_id)
             log_dir = get_log_dir(fsid)
+
             out = CephContainer(
-                image=args.image,
+                image=self.image,
                 entrypoint='/usr/bin/ceph-mon',
                 args=[
                     '--mkfs',
@@ -298,7 +291,7 @@ class Operation(object):
                     '/tmp/config',
                     '--keyring',
                     '/tmp/keyring',
-                ] + get_daemon_args(fsid, 'mon', daemon_id),
+                ] + get_daemon_args(self.fsid, 'mon', daemon_id),
                 volume_mounts={
                     log_dir: '/var/log/ceph:z',
                     mon_dir: '/var/lib/ceph/mon/ceph-%s:z' % (daemon_id),
@@ -313,9 +306,15 @@ class Operation(object):
                 os.fchmod(f.fileno(), 0o600)
                 f.write(config)
         else:
-            # dirs, conf, keyring
-            self.directory.create_daemon_dirs(fsid, daemon_type, daemon_id, uid, gid, config,
-                               keyring)
+            # TODO: this is only for bootstrapping
+            with open(self.output_config, 'r') as _fd:
+                config = _fd.read()
+
+            self.directory.create_daemon_dirs(
+                daemon_type=daemon_type,
+                daemon_id=daemon_id,
+                config=config,
+                keyring=keyring)
 
         if daemon_type == 'osd' and args.osd_fsid:
             pc = CephContainer(
@@ -332,4 +331,29 @@ class Operation(object):
             )
             pc.run()
 
-        deploy_daemon_units(fsid, daemon_type, daemon_id, c)
+        self.deploy_daemon_units(daemon_type, daemon_id, container)
+
+    def wait_for_health(self):
+        while True:
+            out = CephContainer(
+                image=self.image,
+                entrypoint='/usr/bin/ceph',
+                args=[
+                    '-k', '/etc/ceph/bootstrap/ceph.keyring', '-c',
+                    '/var/lib/ceph/mon/ceph-admin/config', 'status', '-f',
+                    'json-pretty'
+                ],
+                volume_mounts={
+                    # TODO: remove hardcoded values (mon, admin)
+                    f'/var/lib/ceph/{self.fsid}/mon.admin': '/var/lib/ceph/mon/ceph-admin:z',
+                    f'/etc/ceph/bootstrap': '/etc/ceph/bootstrap'
+                },
+            ).run()
+
+            json_out = json.loads(out.stdout)
+            if json_out.get('mgrmap', {}).get('available', False):
+                logging.info('mgr is up')
+                break
+
+            logging.info('mgr is still not available yet, waiting...')
+            time.sleep(1)

@@ -38,6 +38,7 @@ from utils import make_fsid, get_hostname, create_daemon_dirs, get_unit_name, ex
 from config import Config
 from keyrings import Keyring
 from operation import Operation
+from ssh import SSH
 
 try:
     from StringIO import StringIO
@@ -72,34 +73,6 @@ def get_legacy_daemon_fsid(cluster_name, daemon_type, daemon_id):
     return fsid
 
 
-def get_config_and_keyring():
-    # TODO: args
-    if args.config_and_keyring:
-        if args.config_and_keyring == '-':
-            try:
-                j = injected_stdin
-            except NameError:
-                j = sys.stdin.read()
-        else:
-            with open(args.config_and_keyring, 'r') as f:
-                j = f.read()
-        d = json.loads(j)
-        config = d.get('config')
-        keyring = d.get('keyring')
-    else:
-        if args.key:
-            keyring = '[%s]\n\tkey = %s\n' % (args.name, args.key)
-        elif args.keyring:
-            with open(args.keyring, 'r') as f:
-                keyring = f.read()
-        else:
-            raise RuntimeError('no keyring')
-        with open(args.config, 'r') as f:
-            config = f.read()
-    return (config, keyring)
-
-
-
 def gen_ssh_key(fsid):
     tmp_dir = tempfile.TemporaryDirectory()
     path = tmp_dir.name + '/key'
@@ -115,12 +88,6 @@ def gen_ssh_key(fsid):
     tmp_dir.cleanup()
     return (secret, pub)
 
-
-##################################
-
-##################################
-
-##################################
 
 ##################################
 
@@ -143,63 +110,6 @@ def command_deploy():
     c = get_container(args.fsid, daemon_type, daemon_id)
     deploy_daemon(args.fsid, daemon_type, daemon_id, c, uid, gid, config,
                   keyring)
-
-
-##################################
-
-
-def command_run():
-    (daemon_type, daemon_id) = args.name.split('.')
-    c = get_container(args.fsid, daemon_type, daemon_id)
-    subprocess.call(c.run_cmd())
-
-
-##################################
-
-
-def command_shell():
-    if args.fsid:
-        make_log_dir(args.fsid)
-    if args.name:
-        if '.' in args.name:
-            (daemon_type, daemon_id) = args.name.split('.')
-        else:
-            daemon_type = args.name
-            daemon_id = None
-    else:
-        daemon_type = 'osd'  # get the most mounts
-        daemon_id = None
-    mounts = get_container_mounts(args.fsid, daemon_type, daemon_id)
-    if args.config:
-        mounts[pathify(args.config)] = '/etc/ceph/ceph.conf:z'
-    if args.keyring:
-        mounts[pathify(args.keyring)] = '/etc/ceph/ceph.keyring:z'
-    c = CephContainer(
-        image=args.image,
-        entrypoint='doesnotmatter',
-        args=[],
-        podman_args=['--privileged'],
-        volume_mounts=mounts)
-    subprocess.call(c.shell_cmd())
-
-
-##################################
-
-
-def command_enter():
-    (daemon_type, daemon_id) = args.name.split('.')
-    c = get_container(args.fsid, daemon_type, daemon_id)
-    subprocess.call(c.exec_cmd(['bash']))
-
-
-##################################
-
-
-def command_exec():
-    (daemon_type, daemon_id) = args.name.split('.')
-    c = get_container(
-        args.fsid, daemon_type, daemon_id, privileged=args.privileged)
-    subprocess.call(c.exec_cmd(args.command))
 
 
 ##################################
@@ -450,6 +360,7 @@ class Bootstrap(object):
             CephContainer, self.image)
         self.keyring = Keyring(self.config)
         self.operation = Operation(self.config)
+        self.ssh = SSH(self.config)
         self.bootstrap()
 
     def __getattr__(self, attr):
@@ -479,168 +390,46 @@ class Bootstrap(object):
 
         self.operation.bootstrap_mon(tmp_keyring, config, 'mon', self.mon_id)
 
-        self.operation.create_mgr(mgr_key)
-
         # output files
         if self.output_keyring:
             with open(self.output_keyring, 'w') as f:
                 os.fchmod(f.fileno(), 0o600)
                 f.write('[client.admin]\n' '\tkey = ' + admin_key + '\n')
+            with open('/etc/ceph/bootstrap/ceph.keyring', 'w') as f:
+                os.fchmod(f.fileno(), 0o600)
+                f.write('[client.admin]\n' '\tkey = ' + admin_key + '\n')
             logging.info('Wrote keyring to %s' % self.output_keyring)
+
         if self.output_config:
             with open(self.output_config, 'w') as f:
                 f.write(config)
             logging.info('Wrote config to %s' % self.output_config)
 
-        logging.info('Waiting for mgr to start...')
-        while True:
-            out = CephContainer(
-                image=self.image,
-                entrypoint='/usr/bin/ceph',
-                args=[
-                    '-n', 'mon.', '-k',
-                    '/var/lib/ceph/mon/ceph-%s/keyring' % mon_id, '-c',
-                    '/var/lib/ceph/mon/ceph-%s/config' % mon_id, 'status',
-                    '-f', 'json-pretty'
-                ],
-                volume_mounts={
-                    mon_dir: '/var/lib/ceph/mon/ceph-%s:z' % (mon_id),
-                },
-            ).run()
-            j = json.loads(out)
-            if j.get('mgrmap', {}).get('available', False):
-                break
-            logging.info('mgr is still not available yet, waiting...')
-            time.sleep(1)
+        self.operation.create_mgr(mgr_key)
+
+        self.operation.wait_for_health()
 
         # ssh
-        if not args.skip_ssh:
-            logging.info('Generating ssh key...')
-            (ssh_key, ssh_pub) = gen_ssh_key(fsid)
+        # TODO
+        #self.ssh.do_ssh_things()
 
-            tmp_key = tempfile.NamedTemporaryFile(mode='w')
-            os.fchmod(tmp_key.fileno(), 0o600)
-            os.fchown(tmp_key.fileno(), uid, gid)
-            tmp_key.write(ssh_key)
-            tmp_key.flush()
-            tmp_pub = tempfile.NamedTemporaryFile(mode='w')
-            os.fchmod(tmp_pub.fileno(), 0o600)
-            os.fchown(tmp_pub.fileno(), uid, gid)
-            tmp_pub.write(ssh_pub)
-            tmp_pub.flush()
 
-            if args.output_pub_ssh_key:
-                with open(args.output_put_ssh_key, 'w') as f:
-                    f.write(ssh_pub)
-                logging.info(
-                    'Wrote public SSH key to to %s' % args.output_pub_ssh_key)
-
-            CephContainer(
-                image=args.image,
-                entrypoint='/usr/bin/ceph',
-                args=[
-                    '-n', 'mon.', '-k',
-                    '/var/lib/ceph/mon/ceph-%s/keyring' % mon_id, '-c',
-                    '/var/lib/ceph/mon/ceph-%s/config' % mon_id, 'config-key',
-                    'set', 'mgr/ssh/ssh_identity_key', '-i', '/tmp/key'
-                ],
-                volume_mounts={
-                    mon_dir: '/var/lib/ceph/mon/ceph-%s:z' % (mon_id),
-                    tmp_key.name: '/tmp/key:z',
-                },
-            ).run()
-            CephContainer(
-                image=args.image,
-                entrypoint='/usr/bin/ceph',
-                args=[
-                    '-n', 'mon.', '-k',
-                    '/var/lib/ceph/mon/ceph-%s/keyring' % mon_id, '-c',
-                    '/var/lib/ceph/mon/ceph-%s/config' % mon_id, 'config-key',
-                    'set', 'mgr/ssh/ssh_identity_pub', '-i', '/tmp/pub'
-                ],
-                volume_mounts={
-                    mon_dir: '/var/lib/ceph/mon/ceph-%s:z' % (mon_id),
-                    tmp_pub.name: '/tmp/pub:z',
-                },
-            ).run()
-
-            logging.info('Adding key to root@localhost\'s authorized_keys...')
-            with open('/root/.ssh/authorized_keys', 'a') as f:
-                os.fchmod(f.fileno(), 0o600)  # just in case we created it
-                f.write(ssh_pub + '\n')
-
-            logging.info('Enabling ssh module...')
-            CephContainer(
-                image=args.image,
-                entrypoint='/usr/bin/ceph',
-                args=[
-                    '-n', 'mon.', '-k',
-                    '/var/lib/ceph/mon/ceph-%s/keyring' % mon_id, '-c',
-                    '/var/lib/ceph/mon/ceph-%s/config' % mon_id, 'mgr',
-                    'module', 'enable', 'ssh'
-                ],
-                volume_mounts={
-                    mon_dir: '/var/lib/ceph/mon/ceph-%s:z' % (mon_id),
-                    tmp_pub.name: '/tmp/pub:z',
-                },
-            ).run()
-            logging.info('Setting orchestrator backend to ssh...')
-            CephContainer(
-                image=args.image,
-                entrypoint='/usr/bin/ceph',
-                args=[
-                    '-n', 'mon.', '-k',
-                    '/var/lib/ceph/mon/ceph-%s/keyring' % mon_id, '-c',
-                    '/var/lib/ceph/mon/ceph-%s/config' % mon_id,
-                    'orchestrator', 'set', 'backend', 'ssh'
-                ],
-                volume_mounts={
-                    mon_dir: '/var/lib/ceph/mon/ceph-%s:z' % (mon_id),
-                    tmp_pub.name: '/tmp/pub:z',
-                },
-            ).run()
-            host = get_hostname()
-            logging.info('Adding host %s...' % host)
-            CephContainer(
-                image=args.image,
-                entrypoint='/usr/bin/ceph',
-                args=[
-                    '-n', 'mon.', '-k',
-                    '/var/lib/ceph/mon/ceph-%s/keyring' % mon_id, '-c',
-                    '/var/lib/ceph/mon/ceph-%s/config' % mon_id,
-                    'orchestrator', 'host', 'add', host
-                ],
-                volume_mounts={
-                    mon_dir: '/var/lib/ceph/mon/ceph-%s:z' % (mon_id),
-                    tmp_pub.name: '/tmp/pub:z',
-                },
-            ).run()
-        return 0
+def run(config):
+    Operation(config).wait_for_health()
 
 
 def main(config):
     print(config)
 
-    mapper = {'version': Version, 'deploy': Deploy, 'bootstrap': Bootstrap}
+    mapper = {
+        'version': Version,
+        'deploy': Deploy,
+        'bootstrap': Bootstrap,
+        'run': run
+    }
     # No default values or exception checking needed here,
     # argparse only allows defined subcommands.
     mapper.get(config.command)(config)
-
-
-def container_app():
-    # TODO: args
-    if args.docker:
-        podman_path = find_program('docker')
-    else:
-        for i in PODMAN_PREFERENCE:
-            try:
-                podman_path = find_program(i)
-                break
-            except Exception as e:
-                logging.debug('could not locate %s: %s' % (i, e))
-        if not podman_path:
-            raise RuntimeError(
-                'unable to locate any of %s' % PODMAN_PREFERENCE)
 
 
 if __name__ == '__main__':

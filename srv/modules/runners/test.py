@@ -1,7 +1,9 @@
-from ext_lib.utils import humanize_return, exec_runner
-from ext_lib.exceptions import RunnerException, ModuleException
-from ext_lib.operation import exec_module
-from ext_lib.decorators import catches
+from .ext_lib.utils import humanize_return, exec_runner
+from .ext_lib.exceptions import RunnerException, ModuleException
+from .ext_lib.operation import exec_module
+from .ext_lib.decorators import catches
+
+
 """
 This is an example runner function that calls one minion-module internally.
 
@@ -99,7 +101,7 @@ def bad(called_by_runner=False, called_by_orch=False):
         function='mon_failure',
         target='roles:mon',
         arguments=['admin'])
-        # TODO:
+    # TODO:
         # kwargs implementation is missing
 
 

@@ -10,7 +10,6 @@ from collections import Counter
 # pylint: disable=import-error,3rd-party-module-not-gated,redefined-builtin
 import salt.client
 import salt.ext.six as six
-from ext_lib.test import print_foo
 
 
 def _get_data(cluster_name='ceph'):
@@ -33,7 +32,6 @@ def help_():
     """
     Usage
     """
-    print_foo('fooaosdo')
     usage = ('salt-run status.report:\n\n'
              '    Summarizes OS, Ceph and Salt versions\n'
              '\n\n')

@@ -1,9 +1,17 @@
-from .ext_lib.utils import humanize_return, exec_runner
-from .ext_lib.exceptions import RunnerException, ModuleException
-from .ext_lib.operation import exec_module
-from .ext_lib.decorators import catches
+try:
+    from .ext_lib.utils import humanize_return, exec_runner
+    from .ext_lib.exceptions import RunnerException, ModuleException
+    from .ext_lib.operation import exec_module
+    from .ext_lib.decorators import catches
+except:
+    from ext_lib.utils import humanize_return, exec_runner
+    from ext_lib.exceptions import RunnerException, ModuleException
+    from ext_lib.operation import exec_module
+    from ext_lib.decorators import catches
 
-
+# FIXME: pytest requires a leading dot(.) [relative import] while salt requires the
+# [absolute import] without a dot. This can probably be solved with the sys.path variable.
+# The try:except: import is pretty stupid, fix it later.
 """
 This is an example runner function that calls one minion-module internally.
 
@@ -95,14 +103,12 @@ def good(non_interactive=False, called_by_runner=False, called_by_orch=False):
 def bad(called_by_runner=False, called_by_orch=False):
     results = list()
 
-
     result, data = exec_module(
         module='keyring',
         function='mon_failure',
         target='roles:mon',
         arguments=['admin'])
-    # TODO:
-        # kwargs implementation is missing
+    # TODO kwargs implementation is missing
     results.append(result)
 
     return results
@@ -128,6 +134,7 @@ def runner_calls_runner(called_by_runner=False, called_by_orch=False):
     results.append(result)
 
     return results
+
 
 @catches(RunnerException)
 def runner_calls_runner_calls_runner(called_by_runner=False,

@@ -39,10 +39,8 @@ def catches(catch=None, called_by_orch=False, called_by_runner=False):
                 results = f(*a, **kw)
             except catch as e:
 
-                # TODO: eval
-                if os.environ.get('IS_THIS_SOMETHING_FOR_US?'):
+                if os.environ.get('DEEPSEA_DEBUG'):
                     raise
-
                 if isinstance(e, RunnerException) or isinstance(
                         e, ModuleException):
                     if kw.get('called_by_orch', called_by_orch):
@@ -60,6 +58,7 @@ def catches(catch=None, called_by_orch=False, called_by_runner=False):
             else:
                 if kw.get('called_by_runner', called_by_runner):
                     # This needs an aggregated result from the TODO above
+
                     return results
                 if kw.get('called_by_orch', called_by_orch):
                     # what does the orchestrator expect. We can pass whatever we need here
